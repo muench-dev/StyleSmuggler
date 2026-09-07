@@ -22,7 +22,7 @@
 # This script does NOT detect or clean up an existing compromise - use
 # stylesmuggler-helper.sh for IoC detection and incident-response cleanup.
 #
-# Usage: ./fix-magento.sh [MAGENTO_ROOT]
+# Usage: ./fix-magento-source.sh [MAGENTO_ROOT]
 
 set -u
 
@@ -255,7 +255,7 @@ relevant service yourself. Watch Adobe's security bulletins for the
 official patch and retire these workarounds once it ships.
 
 (The Graycore composer module and the DI-compiler hardening scaffold were
-handled interactively by fix-magento.sh itself - see its Step 1/2 output.)
+handled interactively by fix-magento-source.sh itself - see its Step 1/2 output.)
 
 1) Cloudflare WAF rule:
 (http.request.uri.path contains "/graphql" and (http.request.uri.query contains "styles%5B" or http.request.uri.query contains "styles[")) or (http.request.uri.query contains "generatorClass" or http.request.uri.query contains "with_resolved") or (http.request.uri.query contains "eval(base64_decode")

@@ -6,10 +6,10 @@ Ref: https://sansec.io/research/stylesmuggler
 
 - `stylesmuggler-helper.sh` — **detect** an existing compromise and, if
   found, walk through **incident-response cleanup**.
-- `fix-magento.sh` — **proactively harden** a Magento/Adobe Commerce
+- `fix-magento-source.sh` — **proactively harden** a Magento/Adobe Commerce
   install against the vulnerability while no official Adobe patch exists.
 
-Use both: run `fix-magento.sh` to apply mitigations, and run
+Use both: run `fix-magento-source.sh` to apply mitigations, and run
 `stylesmuggler-helper.sh` periodically (and immediately if you suspect an
 incident) to check for IoCs.
 
@@ -54,7 +54,7 @@ Example:
 Re-run some checks (cron spool, non-root process scan) as root/sudo to
 cover other system users, e.g. the webserver account.
 
-## `fix-magento.sh` — proactive hardening / mitigation
+## `fix-magento-source.sh` — proactive hardening / mitigation
 
 Applies the community mitigations for StyleSmuggler documented while no
 official Adobe patch exists yet:
@@ -94,7 +94,7 @@ already be present. Validate on a staging system before production.
 ### Usage
 
 ```bash
-./fix-magento.sh [MAGENTO_ROOT]
+./fix-magento-source.sh [MAGENTO_ROOT]
 ```
 
 - `MAGENTO_ROOT` — path to the Magento/Adobe Commerce root (default: `.`)
@@ -102,7 +102,7 @@ already be present. Validate on a staging system before production.
 Example:
 
 ```bash
-./fix-magento.sh /var/www/magento
+./fix-magento-source.sh /var/www/magento
 ```
 
 ## Disclaimer
