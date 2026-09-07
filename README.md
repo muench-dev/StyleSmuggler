@@ -288,6 +288,35 @@ Example:
 Exit codes: `0` no risk indicators found, `1` one or more found, `2` usage
 error (missing URL), `3` `curl` not found, `4` shop unreachable.
 
+## Credits
+
+Research and prior art this project builds on:
+
+- [Sansec](https://sansec.io/research/stylesmuggler) — original StyleSmuggler
+  0-day writeup, and the
+  [chronyd-variant follow-up](https://sansec.io/research/stylesmuggler-0day#the-chronyd-variant).
+- [disrex-group/stylesmuggler-mitigation](https://github.com/disrex-group/stylesmuggler-mitigation) —
+  independent incident-response IoCs/mitigation writeup; source of the two
+  real patches `fix-magento-source.sh` applies (`magento/module-email`,
+  `magento/magento2-base`) and of several IoCs cross-referenced into
+  `stylesmuggler-helper.sh`.
+
+Third-party software these scripts install, wire up, or detect:
+
+- [graycoreio/magento2-style-smuggler-patch](https://github.com/graycoreio/magento2-style-smuggler-patch) —
+  Composer hardening module `fix-magento-source.sh` installs and enables.
+- [cweagans/composer-patches](https://github.com/cweagans/composer-patches) —
+  Composer plugin used to apply the Disrex source patches.
+- [jq](https://jqlang.org/) — used to wire patch config into `composer.json`
+  when available.
+- [ddev](https://ddev.com/) and [Warden](https://warden.dev/) — local dev
+  environments `fix-magento-source.sh` auto-detects and runs Composer/
+  `bin/magento` through.
+- [ShellCheck](https://www.shellcheck.net/) (via
+  [ludeeus/action-shellcheck](https://github.com/ludeeus/action-shellcheck))
+  and [GitHub Actions](https://github.com/features/actions) — CI linting and
+  smoke tests on every push.
+
 ## Disclaimer
 
 Both scripts are provided **as is, without warranty of any kind**. Any
