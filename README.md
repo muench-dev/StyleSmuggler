@@ -5,9 +5,14 @@ Magento / Adobe Commerce.
 Ref: https://sansec.io/research/stylesmuggler
 
 - `stylesmuggler-helper.sh` — **detect** an existing compromise and, if
-  found, walk through **incident-response cleanup**.
+  found, walk through **incident-response cleanup**. Run this directly on
+  the **server/hosting environment** (production, staging, or Cloud node)
+  you want to check — not on your local machine.
 - `fix-magento-source.sh` — **proactively harden** a Magento/Adobe Commerce
   install against the vulnerability while no official Adobe patch exists.
+  Run this on your **local development environment** (or wherever you edit
+  and commit the Magento source/Composer dependencies) — it patches the
+  source code, which you then deploy through your normal release process.
 
 Use both: run `fix-magento-source.sh` to apply mitigations, and run
 `stylesmuggler-helper.sh` periodically (and immediately if you suspect an
@@ -19,6 +24,11 @@ test on `ubuntu-latest` and `macos-latest` on every push. `ps`/`sed`/`netstat`
 usage is written to work with both GNU (Linux) and BSD (macOS) userlands.
 
 ## `stylesmuggler-helper.sh` — detection & incident-response cleanup
+
+> **Run this on the server environment**, not your local machine — it scans
+> the live filesystem, running processes, crontabs, and logs of the host
+> it's executed on, so it must run where the (possibly compromised)
+> Magento/Adobe Commerce install actually serves traffic.
 
 Scans the local system for known Indicators of Compromise (IoCs):
 
@@ -97,6 +107,12 @@ node if your plan runs more than one), since the scan only covers the
 local filesystem, processes, and logs of the container it runs on.
 
 ## `fix-magento-source.sh` — proactive hardening / mitigation
+
+> **Run this on your local development environment**, not on a live server
+> — it patches the Magento source code and Composer dependencies (via
+> `composer require`, `setup:upgrade`, `setup:di:compile`), so it belongs in
+> your normal dev workflow, to be committed and deployed like any other
+> code change rather than applied directly in production.
 
 Applies the community mitigations for StyleSmuggler documented while no
 official Adobe patch exists yet:
