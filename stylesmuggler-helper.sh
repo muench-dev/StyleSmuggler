@@ -473,6 +473,49 @@ else
 fi
 
 # ----------------------------------------------------------------------
+# 8. DI-compiler scanner guard (root-cause mitigation) status
+# ----------------------------------------------------------------------
+# This is NOT a compromise IoC - it's a check of whether the actual code
+# guard that closes the underlying object-injection vulnerability (as
+# published by disrex-group/stylesmuggler-mitigation) is already present.
+# Read-only: greps vendor files, never edits them. Missing guard does not
+# increment FOUND_ISSUES since it reflects unpatched-vulnerability exposure,
+# not evidence of a compromise having occurred.
+info "8. Checking for the DI-compiler scanner CLI-only guard (root-cause mitigation)..."
+
+DI_SCANNER_FILES=(
+    "$SHOP_DIR/setup/src/Magento/Setup/Module/Di/Code/Scanner/ArrayScanner.php"
+    "$SHOP_DIR/setup/src/Magento/Setup/Module/Di/Code/Scanner/XmlInterceptorScanner.php"
+    "$SHOP_DIR/setup/src/Magento/Setup/Module/Di/Code/Reader/ClassesScanner.php"
+)
+DI_GUARD_PRESENT=0
+DI_GUARD_TOTAL=0
+DI_SCANNER_MISSING=()
+for f in "${DI_SCANNER_FILES[@]}"; do
+    [ -f "$f" ] || continue
+    DI_GUARD_TOTAL=$((DI_GUARD_TOTAL + 1))
+    if grep -qF "PHP_SAPI !== 'cli'" "$f" 2>/dev/null; then
+        DI_GUARD_PRESENT=$((DI_GUARD_PRESENT + 1))
+    else
+        DI_SCANNER_MISSING+=("$f")
+    fi
+done
+
+if [ "$DI_GUARD_TOTAL" -eq 0 ]; then
+    echo -e "${YELLOW}[-] DI scanner files not found under '$SHOP_DIR/setup/' - specify the shop root as arg 1 to check this.${NC}"
+elif [ "$DI_GUARD_PRESENT" -eq "$DI_GUARD_TOTAL" ]; then
+    ok "DI-compiler scanner CLI-only guard present in all $DI_GUARD_TOTAL scanner file(s)."
+else
+    echo -e "${YELLOW}[-] DI-compiler scanner CLI-only guard missing in $((DI_GUARD_TOTAL - DI_GUARD_PRESENT))/$DI_GUARD_TOTAL scanner file(s):${NC}"
+    for f in "${DI_SCANNER_MISSING[@]}"; do
+        echo -e "    ${YELLOW}- $f${NC}"
+    done
+    echo -e "${YELLOW}    This is the actual root-cause fix (not just perimeter WAF rules) - see${NC}"
+    echo -e "${YELLOW}    https://github.com/disrex-group/stylesmuggler-mitigation (patches/ or modules/)${NC}"
+    echo -e "${YELLOW}    for a ready-made patch. This script does NOT apply it automatically.${NC}"
+fi
+
+# ----------------------------------------------------------------------
 # Summary
 # ----------------------------------------------------------------------
 echo ""
