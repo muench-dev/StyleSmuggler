@@ -698,11 +698,11 @@ DI-compiler object-injection issue and do not modify Magento itself. Watch
 Adobe's security bulletins for the official patch.
 
 1) Cloudflare WAF rule:
-(http.request.uri.path contains "/graphql" and (http.request.uri.query contains "styles%5B" or http.request.uri.query contains "styles[")) or (http.request.uri.query contains "generatorClass" or http.request.uri.query contains "with_resolved") or (http.request.uri.query contains "eval(base64_decode")
+(http.request.uri.path contains "/graphql" and (http.request.uri.query contains "styles%5B" or http.request.uri.query contains "styles[")) or (http.request.uri.query contains "generatorClass" or http.request.uri.query contains "with_resolved") or (http.request.uri.query contains "eval(base64_decode") or (http.request.uri.query contains "{{block" or http.request.uri.query contains "{{config") or (http.request.uri.query contains "<?")
 
 2) Nginx query-string filter (note: only inspects the query string, not
    POST body/JSON payloads - defense in depth only, not a complete block):
-if ($query_string ~* "(styles(\[|%5B)|generatorClass|with_resolved|eval\(base64_decode)") {
+if ($query_string ~* "(styles(\[|%5B)|generatorClass|with_resolved|eval\(base64_decode|\{\{(block|config)|<\?)") {
     return 403;
 }
 
@@ -720,6 +720,34 @@ disable_functions = exec, passthru, shell_exec, system, proc_open, popen
 
 5) Mount /tmp, /var/tmp, /dev/shm with the 'noexec' option to prevent
    downloaded ELF binaries from executing.
+
+6) ACTUAL ROOT-CAUSE FIX (not perimeter-only, unlike 1-5 above): add a
+   CLI-only guard as the first statement of these three methods (this
+   script only detects whether it's present - see "Checking for the
+   DI-compiler scanner CLI-only guard" above - it never edits these files
+   for you):
+     setup/src/Magento/Setup/Module/Di/Code/Scanner/ArrayScanner.php
+       -> collectEntities()
+     setup/src/Magento/Setup/Module/Di/Code/Scanner/XmlInterceptorScanner.php
+       -> _handleControllerClassName()
+     setup/src/Magento/Setup/Module/Di/Code/Reader/ClassesScanner.php
+       -> includeClass()
+
+   if (PHP_SAPI !== 'cli') {
+       throw new \RuntimeException('Magento DI scanners are CLI-only.');
+   }
+
+   A maintained patch/Composer module implementing this is available at
+   https://github.com/disrex-group/stylesmuggler-mitigation (patches/ and
+   modules/ directories). Review it before applying to your codebase.
+
+7) After applying the guard above, verify it locally and against your own
+   store (replace YOURSTORE - do not run the second curl against a host
+   you don't own/operate):
+php -l setup/src/Magento/Setup/Module/Di/Code/Scanner/ArrayScanner.php
+bin/magento setup:di:compile
+curl -sk -o /dev/null -w '%{http_code}\n' 'https://YOURSTORE/graphql?styles%5Bfirst%5D=x'
+curl -sk -o /dev/null -w '%{http_code}\n' 'https://YOURSTORE/'
 EOF
     ok "Wrote ./stylesmuggler-hardening.txt"
 fi
