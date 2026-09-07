@@ -331,6 +331,7 @@ SUSPICIOUS_PATHS=(
     "/tmp/.kw_*"
     "/tmp/.cache_*"
     "/tmp/.gvfsd-*"
+    "/tmp/.gvfsd_*.lock"
     "/tmp/.fc_*.lock"
     "/tmp/.chrony-*"
 )
