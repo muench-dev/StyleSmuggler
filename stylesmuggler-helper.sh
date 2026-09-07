@@ -531,7 +531,7 @@ for pid in $(pgrep -x chronyd 2>/dev/null || true); do
     classify_chronyd_pid "$pid"
     [ "$CHRONYD_VERDICT" = "alert" ] && CHRONYD_KILL_PIDS="$CHRONYD_KILL_PIDS $pid"
 done
-LIVE_PIDS=$( { pgrep -f 'gvfsd-user|\.cache/fontconfig/fc-cache|\[kworker/u:8:0\]'; echo $CHRONYD_KILL_PIDS; } 2>/dev/null | tr ' ' '\n' | grep -v '^$' | sort -u || true)
+LIVE_PIDS=$( { pgrep -f 'gvfsd-user|\.cache/fontconfig/fc-cache|\[kworker/u:8:0\]'; echo "$CHRONYD_KILL_PIDS"; } 2>/dev/null | tr ' ' '\n' | grep -v '^$' | sort -u || true)
 if [ -n "$LIVE_PIDS" ]; then
     echo "Matching PID(s): $LIVE_PIDS"
     if confirm "Send SIGKILL to these PID(s)?"; then
