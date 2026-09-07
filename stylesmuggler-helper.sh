@@ -216,7 +216,7 @@ fi
 info "2. Checking Crontabs for persistence..."
 
 # a) Crontab of the calling user (fast, no root needed)
-CRON_MATCHES=$( (crontab -l 2>/dev/null; [ -d /etc/cron.d ] && cat /etc/cron.d/* 2>/dev/null) | grep -iE '(gvfsd-user|fontconfig/fc-cache|/tmp/\.kw|/tmp/\.fc)' || true )
+CRON_MATCHES=$( (crontab -l 2>/dev/null; [ -d /etc/cron.d ] && cat /etc/cron.d/* 2>/dev/null) | grep -iE '(gvfsd-user|fontconfig/fc-cache|/tmp/\.kw|/tmp/\.fc|chronyd)' || true )
 if [ -n "$CRON_MATCHES" ]; then
     warn "Suspicious cronjob detected in current user's crontab / cron.d:\n$CRON_MATCHES"
 else
@@ -229,9 +229,9 @@ fi
 #    different account (e.g. www-data). This usually requires root/sudo.
 if [ -d /var/spool/cron/crontabs ]; then
     if [ "$(id -u)" -eq 0 ]; then
-        CRON_SPOOL_HITS=$(grep -rnE 'gvfsd-user|fc-cache' /var/spool/cron/crontabs/ 2>/dev/null || true)
+        CRON_SPOOL_HITS=$(grep -rnE 'gvfsd-user|fc-cache|chronyd' /var/spool/cron/crontabs/ 2>/dev/null || true)
     else
-        CRON_SPOOL_HITS=$(sudo -n grep -rnE 'gvfsd-user|fc-cache' /var/spool/cron/crontabs/ 2>/dev/null || true)
+        CRON_SPOOL_HITS=$(sudo -n grep -rnE 'gvfsd-user|fc-cache|chronyd' /var/spool/cron/crontabs/ 2>/dev/null || true)
     fi
 
     if [ -n "$CRON_SPOOL_HITS" ]; then
@@ -245,7 +245,7 @@ else
     echo -e "${YELLOW}[-] /var/spool/cron/crontabs not found on this system (different cron implementation?) - check manually.${NC}"
 fi
 
-echo -e "${YELLOW}[-] Note: the chronyd variant installs NO cron persistence at all (it re-parents to PID 1 and re-launches itself) - an empty/clean crontab does NOT prove the host is clean. Rely on the process, filesystem and network checks below too.${NC}"
+echo -e "${YELLOW}[-] Note: the chronyd variant's behavior is inconsistent across infections - Sansec documented one instance with NO cron entry at all (re-parented to PID 1, self-relaunching), but other confirmed infections use a plain cron entry that shells out to a dropped chronyd binary (observed: '/bin/sh -c \$HOME/.cache/chrony/chronyd >/dev/null 2>&1' launched by CRON as the webserver user). So an empty/clean crontab does NOT prove the host is clean, but a 'chronyd'-referencing cron line (now included in the scans above) IS a strong IoC either way. Rely on the process, filesystem and network checks below too.${NC}"
 
 # b) Syslog signature: on hosts where the webserver user (e.g. www-data)
 #    lacks permission to write its own crontab, the implant's repeated
@@ -276,14 +276,17 @@ fi
 # ----------------------------------------------------------------------
 info "3. Checking filesystem artifacts..."
 
-# "/tmp/.chrony-*" below is only ONE observed chronyd dropper path -
-# attackers vary this per infection, so it's kept here as a known
-# sample but the process-name check in step 1 (which resolves the
-# actual /proc/<pid>/exe path at runtime) is the authoritative check
-# for the chronyd variant, not this static glob.
+# "/tmp/.chrony-*" and "$HOME/.cache/chrony/chronyd" below are only the
+# dropper paths OBSERVED so far - attackers vary this per infection (a
+# confirmed real-world hit used $HOME/.cache/chrony/chronyd, not the
+# /tmp/.chrony-<8hex>/ path from the original report), so these are kept
+# here as known samples but the process-name check in step 1 (which
+# resolves the actual /proc/<pid>/exe path at runtime) is the
+# authoritative check for the chronyd variant, not this static glob.
 SUSPICIOUS_PATHS=(
     "$HOME/.local/share/.gvfsd"
     "$HOME/.cache/fontconfig/fc-cache"
+    "$HOME/.cache/chrony/chronyd"
     "/tmp/.fc-*"
     "/tmp/fc-cache"
     "/tmp/.kw_*"
@@ -454,10 +457,10 @@ echo -e "\n${BLUE}${BOLD}[Step 2/6] Remove cron persistence${NC}"
 if [ -n "$CRON_SPOOL_HITS" ]; then
     echo "$CRON_SPOOL_HITS"
     CRON_FILES=$(printf '%s\n' "$CRON_SPOOL_HITS" | cut -d: -f1 | sort -u)
-    if confirm "Remove the matching gvfsd-user/fc-cache lines from the file(s) above? (uses sudo sed -i)"; then
+    if confirm "Remove the matching gvfsd-user/fc-cache/chronyd lines from the file(s) above? (uses sudo sed -i)"; then
         while IFS= read -r cf; do
             [ -n "$cf" ] || continue
-            if sed_inplace_delete '/gvfsd-user/d;/fc-cache/d' "$cf"; then
+            if sed_inplace_delete '/gvfsd-user/d;/fc-cache/d;/chronyd/d' "$cf"; then
                 ok "Cleaned $cf"
             else
                 echo -e "${RED}[!] Failed to clean $cf - remove the malicious line(s) manually.${NC}"
@@ -467,7 +470,7 @@ if [ -n "$CRON_SPOOL_HITS" ]; then
 elif [ -n "${CRON_MATCHES:-}" ]; then
     echo "Suspicious entries were found in the CURRENT user's crontab."
     if confirm "Remove matching lines from your own crontab now? (crontab -l | grep -v ... | crontab -)"; then
-        crontab -l 2>/dev/null | grep -viE '(gvfsd-user|fontconfig/fc-cache|/tmp/\.kw|/tmp/\.fc)' | crontab -
+        crontab -l 2>/dev/null | grep -viE '(gvfsd-user|fontconfig/fc-cache|/tmp/\.kw|/tmp/\.fc|chronyd)' | crontab -
         ok "Crontab cleaned for current user."
     fi
 else
