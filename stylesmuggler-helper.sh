@@ -155,17 +155,59 @@ else
 fi
 
 # chronyd implant variant - the implant re-drops itself and relaunches
-# disguised as "chronyd" (the real NTP daemon name), running from
-# /tmp/.chrony-<8hex>/chronyd. Matched on that specific dropper path (like
-# the fc-cache check above) rather than the bare process name "chronyd",
-# since the real system chronyd daemon legitimately runs under that name
-# from /usr/sbin/chronyd (or via systemd) - only the /tmp path is malicious.
-SUSPICIOUS_CHRONYD=$(find_procs '\.chrony-[a-f0-9]+/chronyd')
-if [ -n "$SUSPICIOUS_CHRONYD" ]; then
-    warn "Suspicious chronyd implant (chronyd variant) process running:\n$SUSPICIOUS_CHRONYD"
-    MATCHED_PIDS="$MATCHED_PIDS $(echo "$SUSPICIOUS_CHRONYD" | awk '{print $2}')"
+# disguised as "chronyd" (the real NTP daemon name). The drop directory
+# is NOT stable (seen as /tmp/.chrony-<8hex>/chronyd, but attackers vary
+# this per infection), so matching on a specific dropper path is a dead
+# end. Instead, match on the process NAME alone - ANY process named
+# chronyd is inspected here - and classify it by its REAL on-disk binary,
+# resolved via /proc/<pid>/exe (the kernel-resolved executable inode,
+# which - unlike argv[0]/comm - a process cannot spoof). Three outcomes:
+#   - exe resolves to a known system package path (e.g. /usr/sbin/chronyd)
+#     -> confirmed legitimate, no alert.
+#   - exe resolves elsewhere (a /tmp, /var/tmp, /dev/shm, or home/cache
+#     path, or an "(deleted)" binary) -> confirmed implant, hard ALERT.
+#   - exe is unreadable (common when this script runs as an unprivileged
+#     user and the real chronyd runs as root/"_chrony"/"chrony" - Linux
+#     restricts /proc/<pid>/exe of another user's process without root)
+#     -> can't verify either way, so this is a soft advisory, NOT an
+#     ALERT, to avoid flagging every ordinary host that runs real NTP
+#     sync. Re-run as root/sudo for a definitive verdict on these.
+CHRONYD_PIDS=$(pgrep -x chronyd 2>/dev/null | sort -u || true)
+if [ -n "$CHRONYD_PIDS" ]; then
+    CHRONYD_ALERT_DETAIL=""
+    CHRONYD_UNVERIFIED_DETAIL=""
+    CHRONYD_LEGIT_COUNT=0
+    for pid in $CHRONYD_PIDS; do
+        exe_path=$(readlink -f "/proc/$pid/exe" 2>/dev/null || true)
+        line=$(ps -o user,pid,ppid,args -p "$pid" 2>/dev/null | tail -n +2)
+        if [ -n "$exe_path" ]; then
+            case "$exe_path" in
+                /usr/sbin/chronyd|/usr/bin/chronyd|/usr/lib/chrony/chronyd|/sbin/chronyd)
+                    CHRONYD_LEGIT_COUNT=$((CHRONYD_LEGIT_COUNT + 1))
+                    ;;
+                *)
+                    [ -n "$line" ] && CHRONYD_ALERT_DETAIL="${CHRONYD_ALERT_DETAIL}${line}  [exe=${exe_path}]
+"
+                    FOUND_FILES+=("$exe_path")
+                    MATCHED_PIDS="$MATCHED_PIDS $pid"
+                    ;;
+            esac
+        else
+            [ -n "$line" ] && CHRONYD_UNVERIFIED_DETAIL="${CHRONYD_UNVERIFIED_DETAIL}${line}
+"
+        fi
+    done
+    if [ -n "$CHRONYD_ALERT_DETAIL" ]; then
+        warn "chronyd process(es) with a non-standard binary path found (matched by process NAME since the implant's drop path varies between infections; verified via /proc/<pid>/exe, not argv[0]):\n$CHRONYD_ALERT_DETAIL"
+    fi
+    if [ -n "$CHRONYD_UNVERIFIED_DETAIL" ]; then
+        echo -e "${YELLOW}[-] chronyd process(es) found but could not verify their real binary path (/proc/<pid>/exe unreadable without root) - re-run as root/sudo for a definitive check:\n$CHRONYD_UNVERIFIED_DETAIL${NC}"
+    fi
+    if [ -z "$CHRONYD_ALERT_DETAIL" ] && [ -z "$CHRONYD_UNVERIFIED_DETAIL" ]; then
+        ok "chronyd process(es) found but all $CHRONYD_LEGIT_COUNT resolve to a legitimate system binary path."
+    fi
 else
-    ok "No rogue /tmp/.chrony-*/chronyd implant process found."
+    ok "No chronyd process found at all (neither legitimate nor implant)."
 fi
 
 # ----------------------------------------------------------------------
@@ -234,6 +276,11 @@ fi
 # ----------------------------------------------------------------------
 info "3. Checking filesystem artifacts..."
 
+# "/tmp/.chrony-*" below is only ONE observed chronyd dropper path -
+# attackers vary this per infection, so it's kept here as a known
+# sample but the process-name check in step 1 (which resolves the
+# actual /proc/<pid>/exe path at runtime) is the authoritative check
+# for the chronyd variant, not this static glob.
 SUSPICIOUS_PATHS=(
     "$HOME/.local/share/.gvfsd"
     "$HOME/.cache/fontconfig/fc-cache"
@@ -429,7 +476,24 @@ fi
 
 # --- Step 3: kill malicious processes ----------------------------------
 echo -e "\n${BLUE}${BOLD}[Step 3/6] Terminate malicious processes${NC}"
-LIVE_PIDS=$(pgrep -f 'gvfsd-user|\.cache/fontconfig/fc-cache|\[kworker/u:8:0\]|\.chrony-[a-f0-9]+/chronyd' 2>/dev/null | sort -u || true)
+# chronyd is matched by name (-x), not by dropper path, since that path
+# varies between infections - see the detection step above. Unlike the
+# other implants, "chronyd" is also a real system service name, so this
+# blanket SIGKILL step must NOT include a PID just because it's named
+# chronyd: only include it if its /proc/<pid>/exe resolves to a
+# non-standard path. A legit system path, OR an unreadable exe (can't
+# verify - likely a root-owned real daemon we lack permission to check),
+# is excluded here - never auto-killed, even after confirmation, since
+# the confirm prompt below only shows bare PIDs with no path context.
+CHRONYD_KILL_PIDS=""
+for pid in $(pgrep -x chronyd 2>/dev/null || true); do
+    exe_path=$(readlink -f "/proc/$pid/exe" 2>/dev/null || true)
+    case "$exe_path" in
+        ""|/usr/sbin/chronyd|/usr/bin/chronyd|/usr/lib/chrony/chronyd|/sbin/chronyd) ;;
+        *) CHRONYD_KILL_PIDS="$CHRONYD_KILL_PIDS $pid" ;;
+    esac
+done
+LIVE_PIDS=$( { pgrep -f 'gvfsd-user|\.cache/fontconfig/fc-cache|\[kworker/u:8:0\]'; echo $CHRONYD_KILL_PIDS; } 2>/dev/null | tr ' ' '\n' | grep -v '^$' | sort -u || true)
 if [ -n "$LIVE_PIDS" ]; then
     echo "Matching PID(s): $LIVE_PIDS"
     if confirm "Send SIGKILL to these PID(s)?"; then
