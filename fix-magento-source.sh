@@ -398,31 +398,83 @@ if confirm "Download both patch files from disrex-group/stylesmuggler-mitigation
             fi
 
             # -----------------------------------------------------------
-            # Apply via composer install, then recompile DI
+            # Apply the patches, fix up composer.lock, recompile DI
             # -----------------------------------------------------------
-            if [ -n "$JQ_APPLIED" ]; then
-                if confirm "Run: ${COMPOSER_CMD[*]} install ?"; then
-                    if run_composer install; then
-                        ok "composer install completed - patches should now be applied."
+            # cweagans/composer-patches 2.x (current as of writing) does NOT
+            # reapply patches on a plain `composer install` for packages that
+            # are already installed and match composer.lock - it now tracks
+            # patches.lock.json and needs its own commands to notice the
+            # extra.patches change above and actually reinstall the affected
+            # packages. `composer update --lock` is separate again: it only
+            # refreshes composer.lock's content-hash (which DOES cover the
+            # "extra" key) so a later `composer install` - including in CI or
+            # an Adobe Commerce Cloud deploy - doesn't warn/fail on a lock
+            # file that looks out of date because of the extra.patches edit.
+            UPDATE_PACKAGES=(magento/module-email)
+            [ -n "$APPLY_DI_SCANNER_PATCH" ] && UPDATE_PACKAGES+=(magento/magento2-base)
 
-                        if confirm "Run: ${MAGENTO_CMD[*]} setup:di:compile ?"; then
-                            if run_magento setup:di:compile; then
-                                ok "setup:di:compile completed."
-                            else
-                                warn "setup:di:compile failed - inspect the output above."
-                            fi
-                        else
-                            echo "Skipped setup:di:compile."
-                        fi
+            if [ -n "$JQ_APPLIED" ]; then
+                RELOCK_OK=""
+                if confirm "Run: ${COMPOSER_CMD[*]} patches-relock ?  (regenerates patches.lock.json from the extra.patches change above - needs cweagans/composer-patches 2.x)"; then
+                    if run_composer patches-relock; then
+                        ok "patches-relock completed."
+                        RELOCK_OK="1"
                     else
-                        warn "composer install failed - inspect the output above."
+                        warn "patches-relock failed - your cweagans/composer-patches version may predate 2.0 (which added this command). Falling back to forcing a reinstall of the patched package(s) directly."
                     fi
                 else
-                    echo "Skipped composer install - the patches are wired but not yet applied."
+                    echo "Skipped patches-relock."
+                fi
+
+                if [ -n "$RELOCK_OK" ]; then
+                    if confirm "Run: ${COMPOSER_CMD[*]} patches-repatch ?  (deletes and reinstalls ${UPDATE_PACKAGES[*]} so the patch(es) actually take effect - make sure you have no unsaved manual edits inside those vendor/ directories)"; then
+                        if run_composer patches-repatch; then
+                            ok "patches-repatch completed - patches applied to the reinstalled package(s)."
+                        else
+                            warn "patches-repatch failed - inspect the output above."
+                        fi
+                    else
+                        echo "Skipped patches-repatch - the patches are wired but not yet applied to the installed packages."
+                    fi
+                else
+                    echo "Falling back to forcing a reinstall via composer update (works with older"
+                    echo "cweagans/composer-patches versions too):"
+                    if confirm "Run: ${COMPOSER_CMD[*]} update ${UPDATE_PACKAGES[*]} ?"; then
+                        if run_composer update "${UPDATE_PACKAGES[@]}"; then
+                            ok "Reinstalled ${UPDATE_PACKAGES[*]} - patches should now be applied."
+                        else
+                            warn "composer update failed - inspect the output above."
+                        fi
+                    else
+                        echo "Skipped - the patches are wired but not yet applied to the installed packages."
+                    fi
+                fi
+
+                if confirm "Run: ${COMPOSER_CMD[*]} update --lock ?  (refreshes composer.lock's content-hash to match the extra.patches change - avoids a stale-lock warning/failure on your next deploy)"; then
+                    if run_composer update --lock; then
+                        ok "composer.lock content-hash refreshed."
+                    else
+                        warn "composer update --lock failed - inspect the output above."
+                    fi
+                else
+                    echo "Skipped - composer.lock will show as out of date until you run"
+                    echo "'${COMPOSER_CMD[*]} update --lock' yourself."
+                fi
+
+                if confirm "Run: ${MAGENTO_CMD[*]} setup:di:compile ?"; then
+                    if run_magento setup:di:compile; then
+                        ok "setup:di:compile completed."
+                    else
+                        warn "setup:di:compile failed - inspect the output above."
+                    fi
+                else
+                    echo "Skipped setup:di:compile."
                 fi
             else
                 echo "Once you've added the extra.patches entry above, run:"
-                echo "  ${COMPOSER_CMD[*]} install"
+                echo "  ${COMPOSER_CMD[*]} patches-relock"
+                echo "  ${COMPOSER_CMD[*]} patches-repatch   # or: composer update ${UPDATE_PACKAGES[*]} on older cweagans/composer-patches versions"
+                echo "  ${COMPOSER_CMD[*]} update --lock     # refreshes composer.lock's content-hash"
                 echo "  ${MAGENTO_CMD[*]} setup:di:compile"
             fi
 

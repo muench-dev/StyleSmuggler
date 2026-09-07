@@ -147,6 +147,21 @@ official Adobe patch exists yet:
    or lets you skip it and keep only the front-door patch. `composer.json`
    wiring is done via `jq` when available (with a `composer.json.bak`
    backup first); otherwise the exact JSON to add by hand is printed.
+
+   Applying the patches to an already-installed Magento tree isn't a plain
+   `composer install` — `cweagans/composer-patches` 2.x doesn't reapply
+   patches to packages that are already installed and match `composer.lock`.
+   The script instead runs `composer patches-relock` (regenerates
+   `patches.lock.json` from the `extra.patches` change) and
+   `composer patches-repatch` (deletes and reinstalls the two patched
+   packages so the patch actually takes effect), falling back to
+   `composer update magento/module-email magento/magento2-base` for older
+   `cweagans/composer-patches` versions that don't have those commands. It
+   then runs `composer update --lock` — editing `composer.json`'s `extra`
+   key directly makes `composer.lock`'s content-hash stale (Composer hashes
+   `extra` too), so without this a later `composer install` — including in
+   CI or an Adobe Commerce Cloud deploy — would warn or fail on an
+   out-of-date lock file.
 3. Writes webserver/WAF/php.ini/OS hardening suggestions (Cloudflare WAF
    rule, nginx query-string filter, optional `/graphql` endpoint block,
    `disable_functions` for PHP, `noexec` mount advice for `/tmp`,
