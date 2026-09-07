@@ -58,6 +58,17 @@ confirm() {
     esac
 }
 
+# Finds processes whose full command line matches the given regex and
+# prints them with user/pid/ppid/args columns. Uses pgrep to find matching
+# PIDs first (instead of piping 'ps' into 'grep', which would need a
+# 'grep -v grep' workaround to exclude the grep process matching itself).
+find_procs() {
+    local pattern="$1" pids
+    pids=$(pgrep -f "$pattern" 2>/dev/null | paste -sd, - || true)
+    [ -n "$pids" ] && ps -o user,pid,ppid,args -p "$pids" 2>/dev/null
+    return 0
+}
+
 # ----------------------------------------------------------------------
 # 1. Check running processes (kworker masquerading, user-space fc-cache)
 # ----------------------------------------------------------------------
@@ -65,7 +76,7 @@ info "1. Scanning running processes..."
 
 # Real kworkers run as kernel threads (PPID 2 / kthreadd, UID root).
 # The Rust implant runs under the web/user account as [kworker/u:8:0].
-SUSPICIOUS_KWORKER=$(ps -eo user,pid,ppid,args | grep -E '\[kworker/u:8:0\]' | grep -v grep || true)
+SUSPICIOUS_KWORKER=$(find_procs '\[kworker/u:8:0\]')
 if [ -n "$SUSPICIOUS_KWORKER" ]; then
     warn "Suspicious kworker process found running in user space:\n$SUSPICIOUS_KWORKER"
     MATCHED_PIDS="$MATCHED_PIDS $(echo "$SUSPICIOUS_KWORKER" | awk '{print $2}')"
@@ -90,7 +101,7 @@ fi
 # path than the legitimate system tool (usually /usr/bin/fc-cache), so we
 # match specifically on the implant path instead of the generic name
 # 'fc-cache', to avoid false positives from regular font cache runs.
-SUSPICIOUS_FCCACHE=$(ps -eo user,pid,ppid,args | grep -E '\.cache/fontconfig/fc-cache' | grep -v grep || true)
+SUSPICIOUS_FCCACHE=$(find_procs '\.cache/fontconfig/fc-cache')
 if [ -n "$SUSPICIOUS_FCCACHE" ]; then
     warn "Suspicious fc-cache implant process running:\n$SUSPICIOUS_FCCACHE"
     MATCHED_PIDS="$MATCHED_PIDS $(echo "$SUSPICIOUS_FCCACHE" | awk '{print $2}')"
@@ -99,7 +110,7 @@ else
 fi
 
 # gvfsd-user implant variant
-SUSPICIOUS_GVFSD=$(ps -eo user,pid,ppid,args | grep -E 'gvfsd-user' | grep -v grep || true)
+SUSPICIOUS_GVFSD=$(find_procs 'gvfsd-user')
 if [ -n "$SUSPICIOUS_GVFSD" ]; then
     warn "Suspicious gvfsd-user implant process running:\n$SUSPICIOUS_GVFSD"
     MATCHED_PIDS="$MATCHED_PIDS $(echo "$SUSPICIOUS_GVFSD" | awk '{print $2}')"
@@ -321,7 +332,7 @@ fi
 
 # --- Step 3: kill malicious processes ----------------------------------
 echo -e "\n${BLUE}${BOLD}[Step 3/6] Terminate malicious processes${NC}"
-LIVE_PIDS=$(ps -eo pid,args | grep -E 'gvfsd-user|\.cache/fontconfig/fc-cache|\[kworker/u:8:0\]' | grep -v grep | awk '{print $1}' | sort -u || true)
+LIVE_PIDS=$(pgrep -f 'gvfsd-user|\.cache/fontconfig/fc-cache|\[kworker/u:8:0\]' 2>/dev/null | sort -u || true)
 if [ -n "$LIVE_PIDS" ]; then
     echo "Matching PID(s): $LIVE_PIDS"
     if confirm "Send SIGKILL to these PID(s)?"; then
