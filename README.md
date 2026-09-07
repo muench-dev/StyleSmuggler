@@ -1,10 +1,19 @@
-# StyleSmuggler Helper
+# StyleSmuggler Helper Scripts
 
-A bash script to detect and, optionally, help clean up **StyleSmuggler** — a
-0-day RCE affecting Magento / Adobe Commerce.
+Two bash scripts to deal with **StyleSmuggler** — a 0-day RCE affecting
+Magento / Adobe Commerce.
 Ref: https://sansec.io/research/stylesmuggler
 
-## What it does
+- `stylesmuggler-helper.sh` — **detect** an existing compromise and, if
+  found, walk through **incident-response cleanup**.
+- `fix-magento.sh` — **proactively harden** a Magento/Adobe Commerce
+  install against the vulnerability while no official Adobe patch exists.
+
+Use both: run `fix-magento.sh` to apply mitigations, and run
+`stylesmuggler-helper.sh` periodically (and immediately if you suspect an
+incident) to check for IoCs.
+
+## `stylesmuggler-helper.sh` — detection & incident-response cleanup
 
 Scans the local system for known Indicators of Compromise (IoCs):
 
@@ -27,7 +36,7 @@ The script never installs, upgrades, or modifies the Magento application
 itself — it only inspects the OS/filesystem/logs and cleans up OS-level
 implant artifacts if you confirm each step.
 
-## Usage
+### Usage
 
 ```bash
 ./stylesmuggler-helper.sh [SHOP_DIR] [LOG_DIR]
@@ -45,8 +54,60 @@ Example:
 Re-run some checks (cron spool, non-root process scan) as root/sudo to
 cover other system users, e.g. the webserver account.
 
+## `fix-magento.sh` — proactive hardening / mitigation
+
+Applies the community mitigations for StyleSmuggler documented while no
+official Adobe patch exists yet:
+
+1. Installs and enables the `graycoreio/magento2-style-smuggler-patch`
+   Composer module against the Magento install (`composer require`,
+   `module:enable`, `setup:upgrade`, `setup:di:compile`) — this hardening
+   module blocks the `{{block}}` directive in email templates, adds strict
+   class validation before instantiation in the grid-row URL generator
+   factory, and breaks open PHP tags inside fatal Web API error reports to
+   prevent log/report poisoning.
+2. Scaffolds (but does **not** auto-apply) a `cweagans/composer-patches`
+   setup for the DI-compiler "CLI-only" hardening approach published by
+   Disrex. The exact classes/methods to patch aren't published in the
+   source advisory this script is based on, so it writes a placeholder
+   `patches/di-compiler-cli-only.patch.example` file with instructions to
+   obtain and verify the real patch yourself — it never fabricates a code
+   patch or guesses at class names.
+3. Writes webserver/WAF/php.ini/OS hardening suggestions (Cloudflare WAF
+   rule, nginx query-string filter, optional `/graphql` endpoint block,
+   `disable_functions` for PHP, `noexec` mount advice for `/tmp`,
+   `/var/tmp`, `/dev/shm`) to a local `stylesmuggler-fix-snippets.txt` file
+   for manual review.
+
+**Every state-changing step asks for explicit y/N confirmation first.**
+Steps 1–2 actually execute Composer/`bin/magento` commands against the
+Magento root once confirmed. Step 3 **never** edits live nginx/php.ini/
+fstab configuration or restarts any service — it only ever writes a local
+snippet file for you to apply yourself.
+
+This script does not detect or clean up an existing compromise — use
+`stylesmuggler-helper.sh` for that. Administrators must also note the
+Graycore module is a hardening measure, not a fix for the structural root
+cause in the DI compiler, and does not remove any backdoor that may
+already be present. Validate on a staging system before production.
+
+### Usage
+
+```bash
+./fix-magento.sh [MAGENTO_ROOT]
+```
+
+- `MAGENTO_ROOT` — path to the Magento/Adobe Commerce root (default: `.`)
+
+Example:
+
+```bash
+./fix-magento.sh /var/www/magento
+```
+
 ## Disclaimer
 
-This script is provided **as is, without warranty of any kind**. Any
-cleanup/remediation you perform is entirely **at your own risk** — always
-review the findings and each confirmation prompt carefully before proceeding.
+Both scripts are provided **as is, without warranty of any kind**. Any
+cleanup, remediation, or hardening action you perform is entirely **at
+your own risk** — always review the findings and each confirmation
+prompt carefully before proceeding.
