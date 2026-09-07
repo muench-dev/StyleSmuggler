@@ -319,12 +319,27 @@ if confirm "Download both patch files from disrex-group/stylesmuggler-mitigation
             COMPAT_HITS=""
             if confirm "Run the compatibility check for third-party modules calling the DI scanner classes over HTTP? Recommended, but can be slow on a large vendor/ tree."; then
                 info "Checking vendor/ and app/code for third-party use of the DI scanner classes (may take a moment)..."
-                COMPAT_HITS=$(grep -rl --include='*.php' \
-                    -e 'Di\\Code\\Reader\\ClassesScanner' \
-                    -e 'Di\\Code\\Scanner\\ArrayScanner' \
-                    -e 'Di\\Code\\Scanner\\XmlInterceptorScanner' \
-                    "$MAGENTO_ROOT/vendor" "$MAGENTO_ROOT/app/code" 2>/dev/null \
-                    | grep -v '/Test/' | grep -v '/magento2-base/setup/src/' | grep -v obsolete_ || true)
+                # Fixed-string (not regex) patterns - a single literal backslash,
+                # matching the namespace separator as it appears in PHP source.
+                COMPAT_PATTERN_ARGS=(-e 'Di\Code\Reader\ClassesScanner' -e 'Di\Code\Scanner\ArrayScanner' -e 'Di\Code\Scanner\XmlInterceptorScanner')
+                if command -v rg >/dev/null 2>&1; then
+                    # ripgrep: parallel and far faster than grep -r on a large
+                    # vendor/ tree. --no-ignore is required - vendor/ is almost
+                    # always gitignored, and rg would otherwise silently search
+                    # nothing there.
+                    COMPAT_HITS=$(rg -l --no-ignore -F -g '*.php' "${COMPAT_PATTERN_ARGS[@]}" \
+                        "$MAGENTO_ROOT/vendor" "$MAGENTO_ROOT/app/code" 2>/dev/null \
+                        | grep -v '/Test/' | grep -v '/magento2-base/setup/src/' | grep -v obsolete_ || true)
+                else
+                    # Fixed strings + pruning Test/.git directories during the walk
+                    # (instead of filtering matches afterwards) is noticeably
+                    # faster than the previous 3-alternative regex piped through
+                    # 3 more greps.
+                    COMPAT_HITS=$(grep -rl -F --include='*.php' --exclude-dir=Test --exclude-dir=.git \
+                        "${COMPAT_PATTERN_ARGS[@]}" \
+                        "$MAGENTO_ROOT/vendor" "$MAGENTO_ROOT/app/code" 2>/dev/null \
+                        | grep -v '/magento2-base/setup/src/' | grep -v obsolete_ || true)
+                fi
             else
                 warn "Skipped the compatibility check. If a third-party module calls"
                 warn "ClassesScanner over HTTP (e.g. mageplaza/module-admin-permissions'"
