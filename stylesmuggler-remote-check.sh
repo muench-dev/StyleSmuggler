@@ -153,20 +153,34 @@ if [ "$GRAPHQL_REACHABLE" = "1" ]; then
     #    at the edge (WAF/nginx), or does it pass straight through?
     #    This sends only an inert marker value - no template/code payload -
     #    it never attempts to trigger execution.
+    #
+    #    Different backends return different status codes for a perfectly
+    #    normal, unfiltered GraphQL request (some return 200, some 400 for
+    #    a query with no variables, some 501 for a POST body shape they
+    #    don't like, etc.), so a fixed list of "blocked" codes produces
+    #    false positives/negatives. Instead this compares the probe's
+    #    status against the plain baseline request from step 2 (identical
+    #    body, no 'styles[...]' in the query string) - a strong,
+    #    unambiguous block code always counts as filtered; otherwise, only
+    #    a status that DIFFERS from that baseline is treated as a (weaker,
+    #    possibly incidental) filtering signal.
     # --------------------------------------------------------------
     info "4. Probing whether the published 'styles[...]' attack signature is filtered at the edge..."
     PROBE_URL="${GRAPHQL_URL}?styles%5B0%5D=stylesmuggler-remote-check-probe"
     PROBE_STATUS=$(http_status -X POST -H 'Content-Type: application/json' -d "$TYPENAME_QUERY" "$PROBE_URL")
 
     case "$PROBE_STATUS" in
-        403|406|444)
+        403|406|429|444|451)
             harden "Request containing the 'styles[...]' query-string signature was blocked (HTTP $PROBE_STATUS) - a WAF/nginx filter matching the documented mitigation appears to be in place."
             ;;
         "")
             warn "No HTTP status received for the 'styles[...]' probe request (network error) - could not evaluate edge filtering."
             ;;
+        "$GQL_STATUS")
+            warn "Request containing the 'styles[...]' query-string signature was NOT blocked (HTTP $PROBE_STATUS, same as the plain baseline request in step 2) - no edge-level filter for this published attack signature was detected. See stylesmuggler-hardening.txt / fix-magento-source.sh for WAF/nginx rules to add."
+            ;;
         *)
-            warn "Request containing the 'styles[...]' query-string signature was NOT blocked (HTTP $PROBE_STATUS, same as an unfiltered GraphQL request) - no edge-level filter for this published attack signature was detected. See stylesmuggler-hardening.txt / fix-magento-source.sh for WAF/nginx rules to add."
+            harden "Request containing the 'styles[...]' query-string signature got a different response (HTTP $PROBE_STATUS) than the plain baseline request in step 2 (HTTP $GQL_STATUS) - something is rejecting this specific pattern, though this may be a strict request/query-string parser rather than a deliberate WAF rule."
             ;;
     esac
 fi

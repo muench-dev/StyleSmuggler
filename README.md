@@ -245,7 +245,13 @@ and `stylesmuggler-hardening.txt` either reduce or block:
 2. Whether GraphQL introspection is enabled (widens the attack surface)
 3. Whether the published `styles[...]` query-string attack signature is
    filtered at the edge (WAF/nginx) or passes straight through — using only
-   an inert marker value, never a template/code payload
+   an inert marker value, never a template/code payload. Since backends
+   disagree on what a plain, unfiltered GraphQL request returns (`200`,
+   `400`, `501`, ...), this compares the probe's response against a plain
+   baseline request instead of a fixed list of "blocked" status codes: an
+   identical status means nothing filtered this signature, a different one
+   means something rejected it specifically (most likely a WAF/nginx rule,
+   though a strict request parser could produce the same effect)
 4. Whether `/graphql` has been disabled entirely at the webserver (the
    strongest documented mitigation for non-headless storefronts)
 5. Whether `/paypal/transparent/response/` (used in the published attack
