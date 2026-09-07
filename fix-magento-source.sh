@@ -19,6 +19,12 @@
 #
 # Every state-changing action asks for explicit y/N confirmation first.
 #
+# Automatically detects ddev and Warden local dev environments and runs
+# Composer/bin-magento through them (`ddev composer` / `ddev exec ...`,
+# `warden env exec php-fpm ...`) instead of directly on the host. Override
+# detection with FIX_MAGENTO_ENV=ddev|warden|native, and the Warden PHP
+# service name with WARDEN_PHP_SERVICE (default: php-fpm).
+#
 # This script does NOT detect or clean up an existing compromise - use
 # stylesmuggler-helper.sh for IoC detection and incident-response cleanup.
 #
@@ -56,10 +62,37 @@ confirm() {
     esac
 }
 
-# Runs a command inside MAGENTO_ROOT without ever changing this script's cwd.
-run_in_root() {
-    (cd "$MAGENTO_ROOT" && eval "$1")
+# Detects whether MAGENTO_ROOT is managed by ddev, Warden, or plain/native
+# composer+bin/magento on the host. Honors FIX_MAGENTO_ENV=ddev|warden|native
+# as an override for ambiguous or misdetected setups.
+detect_env() {
+    case "${FIX_MAGENTO_ENV:-}" in
+        ddev|warden|native) echo "$FIX_MAGENTO_ENV"; return ;;
+    esac
+
+    if [ -d "$MAGENTO_ROOT/.ddev" ]; then
+        if command -v ddev >/dev/null 2>&1; then
+            echo "ddev"
+            return
+        fi
+        warn "Found '$MAGENTO_ROOT/.ddev' but the 'ddev' CLI is not on PATH - falling back to native (composer/bin/magento run on the host)." >&2
+    fi
+
+    if grep -q '^WARDEN_ENV_NAME=' "$MAGENTO_ROOT/.env" 2>/dev/null; then
+        if command -v warden >/dev/null 2>&1; then
+            echo "warden"
+            return
+        fi
+        warn "Found WARDEN_ENV_NAME in '$MAGENTO_ROOT/.env' but the 'warden' CLI is not on PATH - falling back to native (composer/bin/magento run on the host)." >&2
+    fi
+
+    echo "native"
 }
+
+# Runs Composer / bin/magento inside MAGENTO_ROOT through the detected
+# environment (ddev/Warden/native), without ever changing this script's cwd.
+run_composer() { (cd "$MAGENTO_ROOT" && "${COMPOSER_CMD[@]}" "$@"); }
+run_magento()  { (cd "$MAGENTO_ROOT" && "${MAGENTO_CMD[@]}" "$@"); }
 
 echo -e "${BLUE}${BOLD}=== StyleSmuggler proactive hardening for: $MAGENTO_ROOT ===${NC}\n"
 
@@ -85,6 +118,28 @@ fi
 ok "Found composer.json and bin/magento in '$MAGENTO_ROOT'."
 
 # ----------------------------------------------------------------------
+# Detect ddev / Warden / native and build the command prefixes
+# ----------------------------------------------------------------------
+ENV_MODE=$(detect_env)
+case "$ENV_MODE" in
+    ddev)
+        COMPOSER_CMD=(ddev composer)
+        MAGENTO_CMD=(ddev exec bin/magento)
+        info "Detected environment: ddev"
+        ;;
+    warden)
+        COMPOSER_CMD=(warden env exec -T "${WARDEN_PHP_SERVICE:-php-fpm}" composer)
+        MAGENTO_CMD=(warden env exec -T "${WARDEN_PHP_SERVICE:-php-fpm}" bin/magento)
+        info "Detected environment: warden (service: ${WARDEN_PHP_SERVICE:-php-fpm})"
+        ;;
+    *)
+        COMPOSER_CMD=(composer)
+        MAGENTO_CMD=(bin/magento)
+        info "Detected environment: native (direct composer/bin/magento)"
+        ;;
+esac
+
+# ----------------------------------------------------------------------
 # Step 1: Graycore community patch (executed, confirmed per command)
 # ----------------------------------------------------------------------
 echo -e "\n${BLUE}${BOLD}[Step 1] Graycore community patch (graycoreio/magento2-style-smuggler-patch)${NC}"
@@ -101,8 +156,8 @@ fi
 if [ -n "$ALREADY_INSTALLED" ]; then
     ok "graycore/magento2-style-smuggler-patch already present in composer.json - skipping install."
 else
-    if confirm "Run: composer require graycore/magento2-style-smuggler-patch ?"; then
-        if run_in_root "composer require graycore/magento2-style-smuggler-patch"; then
+    if confirm "Run: ${COMPOSER_CMD[*]} require graycore/magento2-style-smuggler-patch ?"; then
+        if run_composer require graycore/magento2-style-smuggler-patch; then
             ok "Composer package installed."
         else
             warn "composer require failed - inspect the output above before continuing."
@@ -114,16 +169,16 @@ else
 fi
 
 if grep -q '"graycore/magento2-style-smuggler-patch"' "$MAGENTO_ROOT/composer.json" 2>/dev/null; then
-    if confirm "Run: bin/magento module:enable Graycore_StyleSmugglerPatch ?"; then
-        if run_in_root "bin/magento module:enable Graycore_StyleSmugglerPatch"; then
+    if confirm "Run: ${MAGENTO_CMD[*]} module:enable Graycore_StyleSmugglerPatch ?"; then
+        if run_magento module:enable Graycore_StyleSmugglerPatch; then
             ok "Module enabled."
 
-            if confirm "Run: bin/magento setup:upgrade ?"; then
-                if run_in_root "bin/magento setup:upgrade"; then
+            if confirm "Run: ${MAGENTO_CMD[*]} setup:upgrade ?"; then
+                if run_magento setup:upgrade; then
                     ok "setup:upgrade completed."
 
-                    if confirm "Run: bin/magento setup:di:compile ?"; then
-                        if run_in_root "bin/magento setup:di:compile"; then
+                    if confirm "Run: ${MAGENTO_CMD[*]} setup:di:compile ?"; then
+                        if run_magento setup:di:compile; then
                             ok "setup:di:compile completed."
                         else
                             warn "setup:di:compile failed - inspect the output above."
@@ -165,8 +220,8 @@ echo -e "${YELLOW}fabricate or guess at a real code patch.${NC}"
 if grep -q '"cweagans/composer-patches"' "$MAGENTO_ROOT/composer.json" 2>/dev/null; then
     ok "cweagans/composer-patches already present in composer.json."
 else
-    if confirm "Run: composer require cweagans/composer-patches ?"; then
-        if run_in_root "composer require cweagans/composer-patches"; then
+    if confirm "Run: ${COMPOSER_CMD[*]} require cweagans/composer-patches ?"; then
+        if run_composer require cweagans/composer-patches; then
             ok "cweagans/composer-patches installed."
         else
             warn "composer require failed - inspect the output above."
