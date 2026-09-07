@@ -312,15 +312,25 @@ if confirm "Download both patch files from disrex-group/stylesmuggler-mitigation
             # Magento, but mageplaza/module-admin-permissions calls it from
             # an HTTP-reachable admin controller
             # (Controller/Adminhtml/Grid/Rescan.php). This walks vendor/ and
-            # app/code, which can take a while on a real install.
+            # app/code, which can be slow on a large real-world install -
+            # optional, since declining just means applying the DI-scanner
+            # patch without this particular pre-check.
             # -----------------------------------------------------------
-            info "Checking vendor/ and app/code for third-party use of the DI scanner classes (may take a moment)..."
-            COMPAT_HITS=$(grep -rl --include='*.php' \
-                -e 'Di\\Code\\Reader\\ClassesScanner' \
-                -e 'Di\\Code\\Scanner\\ArrayScanner' \
-                -e 'Di\\Code\\Scanner\\XmlInterceptorScanner' \
-                "$MAGENTO_ROOT/vendor" "$MAGENTO_ROOT/app/code" 2>/dev/null \
-                | grep -v '/Test/' | grep -v '/magento2-base/setup/src/' | grep -v obsolete_ || true)
+            COMPAT_HITS=""
+            if confirm "Run the compatibility check for third-party modules calling the DI scanner classes over HTTP? Recommended, but can be slow on a large vendor/ tree."; then
+                info "Checking vendor/ and app/code for third-party use of the DI scanner classes (may take a moment)..."
+                COMPAT_HITS=$(grep -rl --include='*.php' \
+                    -e 'Di\\Code\\Reader\\ClassesScanner' \
+                    -e 'Di\\Code\\Scanner\\ArrayScanner' \
+                    -e 'Di\\Code\\Scanner\\XmlInterceptorScanner' \
+                    "$MAGENTO_ROOT/vendor" "$MAGENTO_ROOT/app/code" 2>/dev/null \
+                    | grep -v '/Test/' | grep -v '/magento2-base/setup/src/' | grep -v obsolete_ || true)
+            else
+                warn "Skipped the compatibility check. If a third-party module calls"
+                warn "ClassesScanner over HTTP (e.g. mageplaza/module-admin-permissions'"
+                warn "Grid/Rescan.php), the DI-scanner patch below may break that admin screen -"
+                warn "verify this yourself if you use such a module."
+            fi
 
             APPLY_DI_SCANNER_PATCH="1"
             if [ -n "$COMPAT_HITS" ]; then
