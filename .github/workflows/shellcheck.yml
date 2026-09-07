@@ -6,10 +6,72 @@ on:
 
 jobs:
   shellcheck:
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
       - name: Run ShellCheck
         uses: ludeeus/action-shellcheck@2.0.0
+
+  smoke-test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Syntax check
+        run: |
+          bash -n stylesmuggler-helper.sh
+          bash -n fix-magento-source.sh
+
+      - name: fix-magento-source.sh - rejects a non-Magento root
+        run: |
+          set +e
+          output=$(./fix-magento-source.sh /definitely-does-not-exist < /dev/null 2>&1)
+          status=$?
+          echo "$output"
+          set -e
+          [ "$status" -eq 1 ]
+          echo "$output" | grep -q "does not look like a Magento/Adobe Commerce root"
+
+      - name: fix-magento-source.sh - detects native environment and runs clean
+        run: |
+          fixture=$(mktemp -d)
+          mkdir -p "$fixture/bin"
+          echo '{}' > "$fixture/composer.json"
+          touch "$fixture/bin/magento"
+
+          # A finite, self-terminating input stream, not `yes N` - under this
+          # step's `pipefail`, `yes` getting SIGPIPE-killed once the script
+          # exits would otherwise surface as a spurious non-zero status even
+          # though the script itself succeeded.
+          output=$(printf 'N\n%.0s' {1..10} | ./fix-magento-source.sh "$fixture" 2>&1)
+          status=$?
+          echo "$output"
+
+          [ "$status" -eq 0 ]
+          echo "$output" | grep -q "Detected environment: native"
+          rm -rf "$fixture"
+
+      - name: stylesmuggler-helper.sh - runs without shell errors
+        run: |
+          set +e
+          output=$(./stylesmuggler-helper.sh . /tmp < /dev/null 2>&1)
+          status=$?
+          echo "$output"
+          set -e
+
+          # Accept a clean result (0) or "issues found"/non-interactive skip (1) -
+          # real IoC findings depend on the runner's own process table and aren't
+          # the thing under test here. Only fail on genuine shell errors.
+          [ "$status" -eq 0 ] || [ "$status" -eq 1 ]
+          ! echo "$output" | grep -Ei "command not found|unbound variable|syntax error"
