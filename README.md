@@ -48,7 +48,12 @@ implant artifacts if you confirm each step.
 ```
 
 - `SHOP_DIR` — path to the Magento/Adobe Commerce root (default: `.`)
-- `LOG_DIR` — path to webserver access logs, file or directory (default: `/var/log`)
+- `LOG_DIR` — path to webserver access logs, file or directory. If omitted,
+  it's auto-detected using the `MAGENTO_CLOUD_PROJECT` environment variable
+  that Adobe Commerce Cloud sets automatically (it holds the project ID):
+  if `/var/log/platform/<project-id>` exists (Pro Staging/Production), that
+  path is used; otherwise it falls back to `/var/log` (Dev environments,
+  on-prem, local).
 
 Example:
 
@@ -58,6 +63,49 @@ Example:
 
 Re-run some checks (cron spool, non-root process scan) as root/sudo to
 cover other system users, e.g. the webserver account.
+
+### Checking an Adobe Commerce Cloud (ACCS/Pro) system
+
+On Adobe Commerce Cloud, the writable filesystem lives under `/mnt/var`
+(mounted from `/app/var` inside the container) and the application code is
+deployed read-only under `/app`. SSH into the environment you want to check
+(e.g. `magento-cloud ssh -e <environment>`), then clone and run the helper
+directly from there:
+
+```bash
+cd /mnt/var
+git clone https://github.com/muench-dev/StyleSmuggler.git
+cd ./StyleSmuggler
+./stylesmuggler-helper.sh /app /var/log
+```
+
+- `/mnt/var` is writable on Cloud containers, so it's a safe place to clone
+  the repo without touching the deployed `/app` code.
+- `/app` is passed as `SHOP_DIR` so the script scans the actual deployed
+  Magento root.
+- The `LOG_DIR` argument (2nd argument) is optional on Cloud: the script
+  auto-detects the right log directory using the `MAGENTO_CLOUD_PROJECT`
+  environment variable that Adobe Commerce Cloud sets automatically on
+  every node (it holds the project ID):
+  - **Pro Staging and Pro Production environments** aggregate logs under
+    `/var/log/platform/<project-id>` — the script uses that path
+    automatically when it exists on disk.
+  - **Dev environments** don't have that platform log directory, so the
+    script falls back to `/var/log`.
+
+  So on Cloud you can usually just run:
+
+  ```bash
+  ./stylesmuggler-helper.sh /app
+  ```
+
+  and the script prints which `LOG_DIR` it auto-detected. Pass an explicit
+  second argument any time to override auto-detection, e.g.
+  `./stylesmuggler-helper.sh /app /var/log/platform/<project-id>`.
+
+Repeat this on each environment/node you want to check (and on each web
+node if your plan runs more than one), since the scan only covers the
+local filesystem, processes, and logs of the container it runs on.
 
 ## `fix-magento-source.sh` — proactive hardening / mitigation
 

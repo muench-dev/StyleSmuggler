@@ -14,6 +14,14 @@
 # a local file for you to review - never applied to live server config.
 #
 # Usage: ./stylesmuggler-helper.sh [SHOP_DIR] [LOG_DIR]
+#
+# If LOG_DIR is not given explicitly, it is auto-detected using the
+# MAGENTO_CLOUD_PROJECT environment variable that Adobe Commerce Cloud sets
+# automatically (holding the project ID): on Pro Staging/Production nodes,
+# webserver logs are aggregated under /var/log/platform/<project-id>, so
+# that path is used when it actually exists on disk. Dev environments (and
+# on-prem/local systems, or Pro nodes where that path doesn't exist) fall
+# back to /var/log.
 
 set -u
 
@@ -25,7 +33,13 @@ BOLD='\033[1m'
 NC='\033[0m'
 
 SHOP_DIR="${1:-.}"
-LOG_DIR="${2:-/var/log}"
+if [ -n "${2:-}" ]; then
+    LOG_DIR="$2"
+elif [ -n "${MAGENTO_CLOUD_PROJECT:-}" ] && [ -d "/var/log/platform/${MAGENTO_CLOUD_PROJECT}" ]; then
+    LOG_DIR="/var/log/platform/${MAGENTO_CLOUD_PROJECT}"
+else
+    LOG_DIR="/var/log"
+fi
 
 FOUND_ISSUES=0
 
@@ -35,6 +49,13 @@ CRON_SPOOL_HITS=""
 MATCHED_PIDS=""
 
 echo -e "${BLUE}=== Checking system for StyleSmuggler IoCs ===${NC}\n"
+if [ -z "${2:-}" ]; then
+    if [ -n "${MAGENTO_CLOUD_PROJECT:-}" ] && [ "$LOG_DIR" = "/var/log/platform/${MAGENTO_CLOUD_PROJECT}" ]; then
+        echo -e "${BLUE}[*] Detected Adobe Commerce Cloud Pro platform logs (MAGENTO_CLOUD_PROJECT=${MAGENTO_CLOUD_PROJECT}) - using LOG_DIR=$LOG_DIR${NC}\n"
+    elif [ -n "${MAGENTO_CLOUD_PROJECT:-}" ]; then
+        echo -e "${BLUE}[*] Detected Adobe Commerce Cloud (MAGENTO_CLOUD_PROJECT=${MAGENTO_CLOUD_PROJECT}) but /var/log/platform/${MAGENTO_CLOUD_PROJECT} not found - using LOG_DIR=$LOG_DIR${NC}\n"
+    fi
+fi
 
 warn() {
     echo -e "${RED}[ALERT] $1${NC}"
