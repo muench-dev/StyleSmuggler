@@ -3,6 +3,7 @@
 # StyleSmuggler (Sansec 0-Day RCE) Detection & Guided Remediation Helper
 # Ref: https://sansec.io/research/stylesmuggler
 #      https://sansec.io/research/stylesmuggler-0day#the-chronyd-variant
+#      https://github.com/disrex-group/stylesmuggler-mitigation
 #
 # Detects known Indicators of Compromise (IoCs) for the StyleSmuggler
 # Magento/Adobe Commerce 0-day - including the fc-cache/gvfsd-user variants
