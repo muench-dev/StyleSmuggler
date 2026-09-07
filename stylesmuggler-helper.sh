@@ -360,11 +360,11 @@ info "4. Checking Magento var/report and var/log for payload traces..."
 
 POISON_HITS=""
 if [ -d "$SHOP_DIR/var/report" ] || [ -f "$SHOP_DIR/var/log/system.log" ]; then
-    POISON_HITS=$(grep -rlE 'eval\(base64_decode' "$SHOP_DIR/var/report/" "$SHOP_DIR/var/log/" 2>/dev/null || true)
+    POISON_HITS=$(grep -rlE 'eval\(base64_decode|X_TRACE_|<\?php' "$SHOP_DIR/var/report/" "$SHOP_DIR/var/log/" 2>/dev/null || true)
     if [ -n "$POISON_HITS" ]; then
-        warn "Poisoned payload fragments ('eval(base64_decode') found:\n$POISON_HITS"
+        warn "Poisoned payload fragments ('eval(base64_decode', 'X_TRACE_' trigger marker, or raw '<?php') found:\n$POISON_HITS"
     else
-        ok "var/report/ and var/log/ clean (no 'eval(base64_decode' injections found)."
+        ok "var/report/ and var/log/ clean (no payload/trigger-marker injections found)."
     fi
 
     SYSTEM_LOG_ERR=$(grep -E 'TypeError.*array_merge' "$SHOP_DIR/var/log/system.log" 2>/dev/null | head -n 5 || true)
