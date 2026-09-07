@@ -304,104 +304,113 @@ if confirm "Download both patch files from disrex-group/stylesmuggler-mitigation
         cat "$DI_SCANNER_PATCH_FILE"
         echo -e "\n${BOLD}--- $EMAIL_PREVIEW_PATCH_REL ---${NC}"
         cat "$EMAIL_PREVIEW_PATCH_FILE"
-        echo -e "\n${YELLOW}Review the diffs above before continuing.${NC}"
+        echo ""
+        if confirm "Reviewed the diffs above - continue applying them (compatibility check + composer.json wiring)?"; then
+            # -----------------------------------------------------------
+            # Compatibility check (from the upstream patches/README.md):
+            # guarding ClassesScanner::includeClass() is safe for stock
+            # Magento, but mageplaza/module-admin-permissions calls it from
+            # an HTTP-reachable admin controller
+            # (Controller/Adminhtml/Grid/Rescan.php). This walks vendor/ and
+            # app/code, which can take a while on a real install.
+            # -----------------------------------------------------------
+            info "Checking vendor/ and app/code for third-party use of the DI scanner classes (may take a moment)..."
+            COMPAT_HITS=$(grep -rl --include='*.php' \
+                -e 'Di\\Code\\Reader\\ClassesScanner' \
+                -e 'Di\\Code\\Scanner\\ArrayScanner' \
+                -e 'Di\\Code\\Scanner\\XmlInterceptorScanner' \
+                "$MAGENTO_ROOT/vendor" "$MAGENTO_ROOT/app/code" 2>/dev/null \
+                | grep -v '/Test/' | grep -v '/magento2-base/setup/src/' | grep -v obsolete_ || true)
 
-        # ---------------------------------------------------------------
-        # Compatibility check (from the upstream patches/README.md):
-        # guarding ClassesScanner::includeClass() is safe for stock
-        # Magento, but mageplaza/module-admin-permissions calls it from an
-        # HTTP-reachable admin controller (Controller/Adminhtml/Grid/Rescan.php).
-        # ---------------------------------------------------------------
-        COMPAT_HITS=$(grep -rl --include='*.php' \
-            -e 'Di\\Code\\Reader\\ClassesScanner' \
-            -e 'Di\\Code\\Scanner\\ArrayScanner' \
-            -e 'Di\\Code\\Scanner\\XmlInterceptorScanner' \
-            "$MAGENTO_ROOT/vendor" "$MAGENTO_ROOT/app/code" 2>/dev/null \
-            | grep -v '/Test/' | grep -v '/magento2-base/setup/src/' | grep -v obsolete_ || true)
-
-        APPLY_DI_SCANNER_PATCH="1"
-        if [ -n "$COMPAT_HITS" ]; then
-            warn "Found third-party code referencing the DI scanner classes outside tests:"
-            echo "$COMPAT_HITS"
-            warn "This looks like mageplaza/module-admin-permissions (or similar), which calls"
-            warn "ClassesScanner from an HTTP-reachable admin controller (Grid/Rescan.php)."
-            warn "Applying the DI-scanner CLI-only guard as-is may break that admin screen (500)."
-            if ! confirm "Apply the magento/magento2-base DI-scanner patch anyway, understanding this risk?"; then
-                echo "Skipped the magento/magento2-base patch. The magento/module-email front-door"
-                echo "patch is the stronger of the two anyway (it makes the DI scanners unreachable"
-                echo "in the first place) and has no such caveat."
-                APPLY_DI_SCANNER_PATCH=""
+            APPLY_DI_SCANNER_PATCH="1"
+            if [ -n "$COMPAT_HITS" ]; then
+                warn "Found third-party code referencing the DI scanner classes outside tests:"
+                echo "$COMPAT_HITS"
+                warn "This looks like mageplaza/module-admin-permissions (or similar), which calls"
+                warn "ClassesScanner from an HTTP-reachable admin controller (Grid/Rescan.php)."
+                warn "Applying the DI-scanner CLI-only guard as-is may break that admin screen (500)."
+                if ! confirm "Apply the magento/magento2-base DI-scanner patch anyway, understanding this risk?"; then
+                    echo "Skipped the magento/magento2-base patch. The magento/module-email front-door"
+                    echo "patch is the stronger of the two anyway (it makes the DI scanners unreachable"
+                    echo "in the first place) and has no such caveat."
+                    APPLY_DI_SCANNER_PATCH=""
+                fi
             fi
-        fi
 
-        # ---------------------------------------------------------------
-        # Wire composer.json extra.patches (merge, never overwrite)
-        # ---------------------------------------------------------------
-        JQ_APPLIED=""
-        if command -v jq >/dev/null 2>&1; then
-            if confirm "Automatically wire composer.json extra.patches via jq (backs up to composer.json.bak first)?"; then
-                cp "$MAGENTO_ROOT/composer.json" "$MAGENTO_ROOT/composer.json.bak"
+            # -----------------------------------------------------------
+            # Wire composer.json extra.patches (merge, never overwrite)
+            # -----------------------------------------------------------
+            JQ_APPLIED=""
+            if command -v jq >/dev/null 2>&1; then
+                if confirm "Automatically wire composer.json extra.patches via jq (backs up to composer.json.bak first)?"; then
+                    cp "$MAGENTO_ROOT/composer.json" "$MAGENTO_ROOT/composer.json.bak"
 
-                # $emailPath/$diPath below are jq --arg names, not bash variables -
-                # they must stay single-quoted so bash leaves them alone.
-                JQ_FILTER='.extra //= {} | .extra["composer-exit-on-patch-failure"] = true | .extra.patches //= {}'
-                # shellcheck disable=SC2016
-                JQ_FILTER="$JQ_FILTER"' | .extra.patches["magento/module-email"] //= {} | .extra.patches["magento/module-email"]["StyleSmuggler: email template preview is admin-area only (Sansec 2026-09-05)"] = $emailPath'
-                if [ -n "$APPLY_DI_SCANNER_PATCH" ]; then
+                    # $emailPath/$diPath below are jq --arg names, not bash variables -
+                    # they must stay single-quoted so bash leaves them alone.
+                    JQ_FILTER='.extra //= {} | .extra["composer-exit-on-patch-failure"] = true | .extra.patches //= {}'
                     # shellcheck disable=SC2016
-                    JQ_FILTER="$JQ_FILTER"' | .extra.patches["magento/magento2-base"] //= {} | .extra.patches["magento/magento2-base"]["StyleSmuggler: DI code scanners are CLI-only (Sansec 2026-09-05, no CVE yet)"] = $diPath'
-                fi
+                    JQ_FILTER="$JQ_FILTER"' | .extra.patches["magento/module-email"] //= {} | .extra.patches["magento/module-email"]["StyleSmuggler: email template preview is admin-area only (Sansec 2026-09-05)"] = $emailPath'
+                    if [ -n "$APPLY_DI_SCANNER_PATCH" ]; then
+                        # shellcheck disable=SC2016
+                        JQ_FILTER="$JQ_FILTER"' | .extra.patches["magento/magento2-base"] //= {} | .extra.patches["magento/magento2-base"]["StyleSmuggler: DI code scanners are CLI-only (Sansec 2026-09-05, no CVE yet)"] = $diPath'
+                    fi
 
-                if jq --arg emailPath "$EMAIL_PREVIEW_PATCH_REL" --arg diPath "$DI_SCANNER_PATCH_REL" \
-                    "$JQ_FILTER" "$MAGENTO_ROOT/composer.json" > "$MAGENTO_ROOT/composer.json.tmp" \
-                    && mv "$MAGENTO_ROOT/composer.json.tmp" "$MAGENTO_ROOT/composer.json"; then
-                    ok "Wired extra.patches into composer.json (backup at composer.json.bak)."
-                    JQ_APPLIED="1"
-                else
-                    warn "jq merge failed - composer.json was left untouched, see composer.json.bak."
-                    rm -f "$MAGENTO_ROOT/composer.json.tmp"
+                    if jq --arg emailPath "$EMAIL_PREVIEW_PATCH_REL" --arg diPath "$DI_SCANNER_PATCH_REL" \
+                        "$JQ_FILTER" "$MAGENTO_ROOT/composer.json" > "$MAGENTO_ROOT/composer.json.tmp" \
+                        && mv "$MAGENTO_ROOT/composer.json.tmp" "$MAGENTO_ROOT/composer.json"; then
+                        ok "Wired extra.patches into composer.json (backup at composer.json.bak)."
+                        JQ_APPLIED="1"
+                    else
+                        warn "jq merge failed - composer.json was left untouched, see composer.json.bak."
+                        rm -f "$MAGENTO_ROOT/composer.json.tmp"
+                    fi
                 fi
             fi
-        fi
 
-        if [ -z "$JQ_APPLIED" ]; then
-            echo "Add this to your composer.json 'extra' block by hand (merge with any existing entries):"
-            print_patches_json_snippet
-        fi
+            if [ -z "$JQ_APPLIED" ]; then
+                echo "Add this to your composer.json 'extra' block by hand (merge with any existing entries):"
+                print_patches_json_snippet
+            fi
 
-        # ---------------------------------------------------------------
-        # Apply via composer install, then recompile DI
-        # ---------------------------------------------------------------
-        if [ -n "$JQ_APPLIED" ]; then
-            if confirm "Run: ${COMPOSER_CMD[*]} install ?"; then
-                if run_composer install; then
-                    ok "composer install completed - patches should now be applied."
+            # -----------------------------------------------------------
+            # Apply via composer install, then recompile DI
+            # -----------------------------------------------------------
+            if [ -n "$JQ_APPLIED" ]; then
+                if confirm "Run: ${COMPOSER_CMD[*]} install ?"; then
+                    if run_composer install; then
+                        ok "composer install completed - patches should now be applied."
 
-                    if confirm "Run: ${MAGENTO_CMD[*]} setup:di:compile ?"; then
-                        if run_magento setup:di:compile; then
-                            ok "setup:di:compile completed."
+                        if confirm "Run: ${MAGENTO_CMD[*]} setup:di:compile ?"; then
+                            if run_magento setup:di:compile; then
+                                ok "setup:di:compile completed."
+                            else
+                                warn "setup:di:compile failed - inspect the output above."
+                            fi
                         else
-                            warn "setup:di:compile failed - inspect the output above."
+                            echo "Skipped setup:di:compile."
                         fi
                     else
-                        echo "Skipped setup:di:compile."
+                        warn "composer install failed - inspect the output above."
                     fi
                 else
-                    warn "composer install failed - inspect the output above."
+                    echo "Skipped composer install - the patches are wired but not yet applied."
                 fi
             else
-                echo "Skipped composer install - the patches are wired but not yet applied."
+                echo "Once you've added the extra.patches entry above, run:"
+                echo "  ${COMPOSER_CMD[*]} install"
+                echo "  ${MAGENTO_CMD[*]} setup:di:compile"
             fi
-        else
-            echo "Once you've added the extra.patches entry above, run:"
-            echo "  ${COMPOSER_CMD[*]} install"
-            echo "  ${MAGENTO_CMD[*]} setup:di:compile"
-        fi
 
-        echo -e "\nVerify the patch(es) took with:"
-        echo "  grep -c 'StyleSmuggler mitigation' \\"
-        [ -n "$APPLY_DI_SCANNER_PATCH" ] && echo "    $MAGENTO_ROOT/setup/src/Magento/Setup/Module/Di/Code/Scanner/ArrayScanner.php \\"
-        echo "    $MAGENTO_ROOT/vendor/magento/module-email/Block/Adminhtml/Template/Preview.php"
+            echo -e "\nVerify the patch(es) took with:"
+            echo "  grep -c 'StyleSmuggler mitigation' \\"
+            [ -n "$APPLY_DI_SCANNER_PATCH" ] && echo "    $MAGENTO_ROOT/setup/src/Magento/Setup/Module/Di/Code/Scanner/ArrayScanner.php \\"
+            echo "    $MAGENTO_ROOT/vendor/magento/module-email/Block/Adminhtml/Template/Preview.php"
+        else
+            echo "Left downloaded for reference only at $DI_SCANNER_PATCH_REL and"
+            echo "$EMAIL_PREVIEW_PATCH_REL - not touching composer.json. Wire them in"
+            echo "yourself when ready; see patches/README.md at:"
+            echo "https://github.com/disrex-group/stylesmuggler-mitigation/blob/${PATCH_REPO_REF}/patches/README.md"
+        fi
     else
         echo "One or more downloads failed - not touching composer.json. Retry, or get the"
         echo "patches manually from: https://github.com/disrex-group/stylesmuggler-mitigation/tree/${PATCH_REPO_REF}/patches"
