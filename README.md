@@ -124,13 +124,29 @@ official Adobe patch exists yet:
    class validation before instantiation in the grid-row URL generator
    factory, and breaks open PHP tags inside fatal Web API error reports to
    prevent log/report poisoning.
-2. Scaffolds (but does **not** auto-apply) a `cweagans/composer-patches`
-   setup for the DI-compiler "CLI-only" hardening approach published by
-   Disrex. The exact classes/methods to patch aren't published in the
-   source advisory this script is based on, so it writes a placeholder
-   `patches/di-compiler-cli-only.patch.example` file with instructions to
-   obtain and verify the real patch yourself — it never fabricates a code
-   patch or guesses at class names.
+2. Downloads and applies, via `cweagans/composer-patches`, the two real
+   source patches Disrex has published for the root cause:
+   - `magento/module-email` — the **front door**: the email template preview
+     block renders `{{block}}` template directives from an unauthenticated
+     request; guarded to admin-area-only, which makes the whole gadget chain
+     unreachable. Disrex calls this the stronger of the two.
+   - `magento/magento2-base` — the **sink**: the 3 DI-compiler scanner
+     classes that `include`/`require_once` a caller-supplied path, guarded
+     to CLI-only so `bin/magento setup:di:compile` keeps working.
+
+   Both are fetched from a **pinned commit** of
+   `disrex-group/stylesmuggler-mitigation` (not the `main` branch, to avoid
+   a moving-target supply-chain risk) and printed in full for you to review
+   before anything is wired into `composer.json`. Before applying the
+   DI-scanner patch, it also runs the compatibility check from the upstream
+   README: some third-party modules (e.g.
+   `mageplaza/module-admin-permissions`) call `ClassesScanner` from an
+   HTTP-reachable admin controller, and guarding it there would break that
+   admin screen — if such a reference is found, the script warns and asks a
+   separate, explicit confirmation before applying that part of the patch,
+   or lets you skip it and keep only the front-door patch. `composer.json`
+   wiring is done via `jq` when available (with a `composer.json.bak`
+   backup first); otherwise the exact JSON to add by hand is printed.
 3. Writes webserver/WAF/php.ini/OS hardening suggestions (Cloudflare WAF
    rule, nginx query-string filter, optional `/graphql` endpoint block,
    `disable_functions` for PHP, `noexec` mount advice for `/tmp`,
