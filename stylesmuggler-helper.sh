@@ -2,9 +2,11 @@
 #
 # StyleSmuggler (Sansec 0-Day RCE) Detection & Guided Remediation Helper
 # Ref: https://sansec.io/research/stylesmuggler
+#      https://sansec.io/research/stylesmuggler-0day#the-chronyd-variant
 #
 # Detects known Indicators of Compromise (IoCs) for the StyleSmuggler
-# Magento/Adobe Commerce 0-day, and - if run interactively - offers to walk
+# Magento/Adobe Commerce 0-day - including the fc-cache/gvfsd-user variants
+# and the newer chronyd variant - and, if run interactively, offers to walk
 # through the incident-response steps in the correct order.
 #
 # This script never installs, upgrades, or otherwise modifies the Magento
@@ -152,6 +154,20 @@ else
     ok "No rogue gvfsd-user process found."
 fi
 
+# chronyd implant variant - the implant re-drops itself and relaunches
+# disguised as "chronyd" (the real NTP daemon name), running from
+# /tmp/.chrony-<8hex>/chronyd. Matched on that specific dropper path (like
+# the fc-cache check above) rather than the bare process name "chronyd",
+# since the real system chronyd daemon legitimately runs under that name
+# from /usr/sbin/chronyd (or via systemd) - only the /tmp path is malicious.
+SUSPICIOUS_CHRONYD=$(find_procs '\.chrony-[a-f0-9]+/chronyd')
+if [ -n "$SUSPICIOUS_CHRONYD" ]; then
+    warn "Suspicious chronyd implant (chronyd variant) process running:\n$SUSPICIOUS_CHRONYD"
+    MATCHED_PIDS="$MATCHED_PIDS $(echo "$SUSPICIOUS_CHRONYD" | awk '{print $2}')"
+else
+    ok "No rogue /tmp/.chrony-*/chronyd implant process found."
+fi
+
 # ----------------------------------------------------------------------
 # 2. Check crontabs for persistence
 # ----------------------------------------------------------------------
@@ -187,6 +203,32 @@ else
     echo -e "${YELLOW}[-] /var/spool/cron/crontabs not found on this system (different cron implementation?) - check manually.${NC}"
 fi
 
+echo -e "${YELLOW}[-] Note: the chronyd variant installs NO cron persistence at all (it re-parents to PID 1 and re-launches itself) - an empty/clean crontab does NOT prove the host is clean. Rely on the process, filesystem and network checks below too.${NC}"
+
+# b) Syslog signature: on hosts where the webserver user (e.g. www-data)
+#    lacks permission to write its own crontab, the implant's repeated
+#    attempts show up as "crontab[<pid>]: (www-data) AUTH (crontab command
+#    not allowed)" entries - often in bulk, revealing the infection timing.
+CRON_AUTH_PATTERN='crontab\[[0-9]+\]:.*AUTH \(crontab command not allowed\)'
+CRON_AUTH_HITS=""
+for syslog_file in /var/log/syslog /var/log/cron /var/log/auth.log; do
+    if [ -r "$syslog_file" ]; then
+        HITS=$(grep -aE "$CRON_AUTH_PATTERN" "$syslog_file" 2>/dev/null || true)
+        [ -n "$HITS" ] && CRON_AUTH_HITS="${CRON_AUTH_HITS}${HITS}
+"
+    fi
+done
+if command -v journalctl &>/dev/null; then
+    HITS=$(journalctl -u cron --no-pager 2>/dev/null | grep -aE "$CRON_AUTH_PATTERN" || true)
+    [ -n "$HITS" ] && CRON_AUTH_HITS="${CRON_AUTH_HITS}${HITS}
+"
+fi
+if [ -n "$CRON_AUTH_HITS" ]; then
+    warn "Repeated cron AUTH-denied entries found (implant retrying crontab writes as an unprivileged user - reveals infection timing):\n$CRON_AUTH_HITS"
+else
+    ok "No 'crontab command not allowed' AUTH-denied signature found in syslog/journal."
+fi
+
 # ----------------------------------------------------------------------
 # 3. Check filesystem for implants and dropper paths
 # ----------------------------------------------------------------------
@@ -201,6 +243,7 @@ SUSPICIOUS_PATHS=(
     "/tmp/.cache_*"
     "/tmp/.gvfsd-*"
     "/tmp/.fc_*.lock"
+    "/tmp/.chrony-*"
 )
 
 for pattern in "${SUSPICIOUS_PATHS[@]}"; do
@@ -244,12 +287,29 @@ else
     echo -e "${YELLOW}[-] Neither '$SHOP_DIR/var/report' nor '$SHOP_DIR/var/log/system.log' found. Specify shop root as arg 1: $0 /path/to/magento${NC}"
 fi
 
+# The chronyd-variant report also documents a web shell dropped directly
+# inside the shop's own product-image cache directory, disguised as a
+# regular cache file: pub/media/catalog/product/cache/ss_<10hex>/sync_<10hex>.php
+WEBSHELL_HITS=()
+for f in "$SHOP_DIR"/pub/media/catalog/product/cache/ss_*/sync_*.php; do
+    [ -e "$f" ] && WEBSHELL_HITS+=("$f")
+done
+if [ ${#WEBSHELL_HITS[@]} -gt 0 ]; then
+    warn "Web shell(s) found in product image cache (ss_*/sync_*.php pattern):"
+    for f in "${WEBSHELL_HITS[@]}"; do
+        echo -e "    ${RED}- $f${NC}"
+        FOUND_FILES+=("$f")
+    done
+else
+    ok "No ss_*/sync_*.php web shell pattern found in pub/media/catalog/product/cache."
+fi
+
 # ----------------------------------------------------------------------
 # 5. Active network sockets / C2 connections
 # ----------------------------------------------------------------------
 info "5. Checking active network sockets..."
 
-C2_IPS="99.84.67.186|209.141.43.95|88.216.72.181"
+C2_IPS="99.84.67.186|209.141.43.95|88.216.72.181|182.182.152.48|76.31.99.207|209.73.130.148|77.239.124.107|185.157.160.251"
 if command -v ss &>/dev/null; then
     SOCKET_HITS=$(ss -tupn 2>/dev/null | grep -E "$C2_IPS" || true)
 elif command -v netstat &>/dev/null; then
@@ -265,7 +325,8 @@ if [ -n "$SOCKET_HITS" ]; then
 else
     ok "No active sockets to known C2 IPs."
 fi
-echo -e "${YELLOW}[-] Note: the report also lists C2 domains (247.cdnflare.xyz, windwsecurity.run, ntp.timesync.to, ntp.synctime.to, ntp.timesysnc.net, time.microsft.run) tunneled over NTP/UDP 123 - these are not resolvable from socket state alone; check DNS resolver logs if available.${NC}"
+echo -e "${YELLOW}[-] Note: the report also lists C2 domains (247.cdnflare.xyz, windwsecurity.run, ntp.timesync.to, ntp.synctime.to, ntp.syncstime.to, ntp.timesysnc.net, time.microsft.run, pool.microsft.studio) tunneled over NTP/UDP 123 - these are not resolvable from socket state alone; check DNS resolver logs if available.${NC}"
+echo -e "${YELLOW}[-] Note: the chronyd variant's C2 traffic has a distinctive shape even without DNS logs - it sends NTPv4 packets in 'server' mode (legitimate NTP clients never do this) as nine 48-byte datagrams roughly 10ms apart, repeating every 60 seconds, over UDP/123. To inspect manually: sudo tcpdump -ni any udp port 123 -c 100 -w ntp_check.pcap${NC}"
 
 # ----------------------------------------------------------------------
 # 6. Webserver-Log Search
@@ -368,7 +429,7 @@ fi
 
 # --- Step 3: kill malicious processes ----------------------------------
 echo -e "\n${BLUE}${BOLD}[Step 3/6] Terminate malicious processes${NC}"
-LIVE_PIDS=$(pgrep -f 'gvfsd-user|\.cache/fontconfig/fc-cache|\[kworker/u:8:0\]' 2>/dev/null | sort -u || true)
+LIVE_PIDS=$(pgrep -f 'gvfsd-user|\.cache/fontconfig/fc-cache|\[kworker/u:8:0\]|\.chrony-[a-f0-9]+/chronyd' 2>/dev/null | sort -u || true)
 if [ -n "$LIVE_PIDS" ]; then
     echo "Matching PID(s): $LIVE_PIDS"
     if confirm "Send SIGKILL to these PID(s)?"; then
