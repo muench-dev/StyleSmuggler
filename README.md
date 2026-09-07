@@ -309,9 +309,6 @@ Third-party software these scripts install, wire up, or detect:
   Composer plugin used to apply the Disrex source patches.
 - [jq](https://jqlang.org/) — used to wire patch config into `composer.json`
   when available.
-- [ddev](https://ddev.com/) and [Warden](https://warden.dev/) — local dev
-  environments `fix-magento-source.sh` auto-detects and runs Composer/
-  `bin/magento` through.
 - [ShellCheck](https://www.shellcheck.net/) (via
   [ludeeus/action-shellcheck](https://github.com/ludeeus/action-shellcheck))
   and [GitHub Actions](https://github.com/features/actions) — CI linting and
