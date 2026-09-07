@@ -1,6 +1,6 @@
 # StyleSmuggler Helper Scripts
 
-Two bash scripts to deal with **StyleSmuggler** — a 0-day RCE affecting
+Three bash scripts to deal with **StyleSmuggler** — a 0-day RCE affecting
 Magento / Adobe Commerce.
 Ref: https://sansec.io/research/stylesmuggler
 
@@ -13,12 +13,18 @@ Ref: https://sansec.io/research/stylesmuggler
   Run this on your **local development environment** (or wherever you edit
   and commit the Magento source/Composer dependencies) — it patches the
   source code, which you then deploy through your normal release process.
+- `stylesmuggler-remote-check.sh` — **remotely** check a shop's public
+  GraphQL endpoint for exposure/hardening indicators, given just its base
+  URL. Run this from **anywhere with network access to the shop** — it
+  never touches the server itself, only sends read-only HTTP requests.
 
-Use both: run `fix-magento-source.sh` to apply mitigations, and run
+Use all three: run `fix-magento-source.sh` to apply mitigations, run
 `stylesmuggler-helper.sh` periodically (and immediately if you suspect an
-incident) to check for IoCs.
+incident) to check for IoCs, and run `stylesmuggler-remote-check.sh` to spot-
+check a shop's public GraphQL exposure from the outside — e.g. before and
+after applying the perimeter mitigations.
 
-Both scripts run on Linux and macOS (e.g. a developer's Mac driving a local
+All scripts run on Linux and macOS (e.g. a developer's Mac driving a local
 ddev/Warden Magento environment) — CI runs ShellCheck and a functional smoke
 test on `ubuntu-latest` and `macos-latest` on every push. `ps`/`sed`/`netstat`
 usage is written to work with both GNU (Linux) and BSD (macOS) userlands.
@@ -216,6 +222,65 @@ Example:
 # Force a mode instead of auto-detecting:
 FIX_MAGENTO_ENV=warden WARDEN_PHP_SERVICE=php ./fix-magento-source.sh /var/www/magento
 ```
+
+## `stylesmuggler-remote-check.sh` — remote GraphQL exposure check
+
+> **Run this from anywhere with network access to the shop** — it only
+> sends a handful of read-only HTTP requests to the shop's public base URL
+> and its `/graphql` endpoint; it never logs into or touches the server
+> itself.
+
+Sansec's writeup discloses IoCs (e.g. `POST /graphql?styles[...]=...` as an
+access-log signature) but does **not** publish the full request/mutation
+needed to actually trigger the underlying DI-compiler gadget chain, and no
+official Adobe patch/CVE existed while this script was written. That means
+there is **no reliable way to remotely confirm or rule out the RCE itself**
+from outside the server.
+
+What the script does instead is check **exposure and mitigation-status**
+indicators — things the community mitigations in `fix-magento-source.sh`
+and `stylesmuggler-hardening.txt` either reduce or block:
+
+1. Whether the shop and its `/graphql` endpoint are reachable at all
+2. Whether GraphQL introspection is enabled (widens the attack surface)
+3. Whether the published `styles[...]` query-string attack signature is
+   filtered at the edge (WAF/nginx) or passes straight through — using only
+   an inert marker value, never a template/code payload
+4. Whether `/graphql` has been disabled entirely at the webserver (the
+   strongest documented mitigation for non-headless storefronts)
+5. Whether `/paypal/transparent/response/` (used in the published attack
+   chain's second stage) is reachable — informational only, since it's
+   normal Magento functionality on stores with PayPal enabled, not itself a
+   vulnerability
+
+A "no risk indicators found" result is **not** proof the shop is
+unaffected — it only means these specific exposure/mitigation checks found
+no issue. It doesn't replace `stylesmuggler-helper.sh` (local IoC/compromise
+scan) or `fix-magento-source.sh` (source-level mitigation), and it never
+sends any payload capable of triggering code execution.
+
+### Usage
+
+```bash
+./stylesmuggler-remote-check.sh <SHOP_BASE_URL>
+```
+
+- `SHOP_BASE_URL` — the shop's public base URL (scheme optional, defaults to
+  `https://` if omitted)
+
+Environment overrides:
+
+- `STYLESMUGGLER_TIMEOUT` — per-request curl timeout in seconds (default `10`)
+- `STYLESMUGGLER_INSECURE=1` — pass `curl -k` to skip TLS certificate verification
+
+Example:
+
+```bash
+./stylesmuggler-remote-check.sh https://www.example.com
+```
+
+Exit codes: `0` no risk indicators found, `1` one or more found, `2` usage
+error (missing URL), `3` `curl` not found, `4` shop unreachable.
 
 ## Disclaimer
 

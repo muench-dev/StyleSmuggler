@@ -32,6 +32,7 @@ jobs:
         run: |
           bash -n stylesmuggler-helper.sh
           bash -n fix-magento-source.sh
+          bash -n stylesmuggler-remote-check.sh
 
       - name: fix-magento-source.sh - rejects a non-Magento root
         run: |
@@ -74,4 +75,28 @@ jobs:
           # real IoC findings depend on the runner's own process table and aren't
           # the thing under test here. Only fail on genuine shell errors.
           [ "$status" -eq 0 ] || [ "$status" -eq 1 ]
+          ! echo "$output" | grep -Ei "command not found|unbound variable|syntax error"
+
+      - name: stylesmuggler-remote-check.sh - requires a URL argument
+        run: |
+          set +e
+          output=$(./stylesmuggler-remote-check.sh < /dev/null 2>&1)
+          status=$?
+          echo "$output"
+          set -e
+          [ "$status" -eq 2 ]
+          echo "$output" | grep -q "Usage:"
+
+      - name: stylesmuggler-remote-check.sh - reports an unreachable host cleanly
+        run: |
+          set +e
+          # Deterministic, network-independent "unreachable" target instead of a
+          # real domain, so this doesn't depend on external network/DNS state.
+          output=$(STYLESMUGGLER_TIMEOUT=3 ./stylesmuggler-remote-check.sh http://127.0.0.1:1 < /dev/null 2>&1)
+          status=$?
+          echo "$output"
+          set -e
+
+          [ "$status" -eq 4 ]
+          echo "$output" | grep -q "Could not reach"
           ! echo "$output" | grep -Ei "command not found|unbound variable|syntax error"
