@@ -427,7 +427,7 @@ if [ -d "$LOG_DIR" ] || [ -f "$LOG_DIR" ]; then
     # -r makes the search work regardless of whether LOG_DIR is a single file
     # or a directory (e.g. /var/log) - without -r, grep would abort on a
     # directory with "Is a directory" and SILENTLY return no matches.
-    LOG_HITS=$(grep -rE '(styles(\[|%5B)|generatorClass|with_resolved|eval\(base64_decode|/paypal/transparent/response/\?<\?|209\.141\.43\.95|88\.216\.72\.181|247\.cdnflare\.xyz|windwsecurity\.run)' "$LOG_DIR" 2>/dev/null | head -n 10 || true)
+    LOG_HITS=$(grep -rE '(styles(\[|%5B)|generatorClass|with_resolved|eval\(base64_decode|/paypal/transparent/response/\?<\?|209\.141\.43\.95|88\.216\.72\.181|5\.181\.86\.133|91\.238\.181\.19|247\.cdnflare\.xyz|windwsecurity\.run|X-TRACE-[0-9A-Fa-f]{10}|MG[0-9A-Fa-f]{20}::.*::/MG[0-9A-Fa-f]{20})' "$LOG_DIR" 2>/dev/null | head -n 10 || true)
     if [ -n "$LOG_HITS" ]; then
         warn "Suspicious requests found in access logs (showing first hits):\n$LOG_HITS"
     else
