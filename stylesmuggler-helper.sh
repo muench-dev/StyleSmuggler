@@ -69,6 +69,19 @@ find_procs() {
     return 0
 }
 
+# Deletes lines matching a sed pattern in-place. GNU sed's -i takes the
+# script directly; BSD/macOS sed's -i requires an explicit (possibly empty)
+# backup-suffix argument first, so we detect the flavor via `sed --version`
+# (only GNU sed understands that flag).
+sed_inplace_delete() {
+    local pattern="$1" file="$2"
+    if sed --version >/dev/null 2>&1; then
+        sudo sed -i "$pattern" "$file"
+    else
+        sudo sed -i '' "$pattern" "$file"
+    fi
+}
+
 # ----------------------------------------------------------------------
 # 1. Check running processes (kworker masquerading, user-space fc-cache)
 # ----------------------------------------------------------------------
@@ -90,7 +103,7 @@ fi
 # Zombie/<defunct> processes are also shown by ps in square brackets,
 # regardless of the original program - this is a normal, harmless Linux
 # phenomenon and is therefore explicitly excluded.
-BRACKET_NON_ROOT=$(ps -eo user,pid,ppid,args --no-headers | awk '$4 ~ /^\[/ && $1 != "root" && $0 !~ /<defunct>/' || true)
+BRACKET_NON_ROOT=$(ps -eo user,pid,ppid,args | tail -n +2 | awk '$4 ~ /^\[/ && $1 != "root" && $0 !~ /<defunct>/' || true)
 if [ -n "$BRACKET_NON_ROOT" ]; then
     warn "Process(es) masquerading as kernel threads but NOT running as root:\n$BRACKET_NON_ROOT"
 else
@@ -219,7 +232,9 @@ C2_IPS="99.84.67.186|209.141.43.95|88.216.72.181"
 if command -v ss &>/dev/null; then
     SOCKET_HITS=$(ss -tupn 2>/dev/null | grep -E "$C2_IPS" || true)
 elif command -v netstat &>/dev/null; then
-    SOCKET_HITS=$(netstat -tupn 2>/dev/null | grep -E "$C2_IPS" || true)
+    # -an (all sockets, numeric) is the common denominator between GNU and
+    # BSD/macOS netstat - GNU's -tupn combo isn't understood by BSD netstat.
+    SOCKET_HITS=$(netstat -an 2>/dev/null | grep -E "$C2_IPS" || true)
 else
     SOCKET_HITS=""
 fi
@@ -313,7 +328,7 @@ if [ -n "$CRON_SPOOL_HITS" ]; then
     if confirm "Remove the matching gvfsd-user/fc-cache lines from the file(s) above? (uses sudo sed -i)"; then
         while IFS= read -r cf; do
             [ -n "$cf" ] || continue
-            if sudo sed -i '/gvfsd-user/d;/fc-cache/d' "$cf"; then
+            if sed_inplace_delete '/gvfsd-user/d;/fc-cache/d' "$cf"; then
                 ok "Cleaned $cf"
             else
                 echo -e "${RED}[!] Failed to clean $cf - remove the malicious line(s) manually.${NC}"
