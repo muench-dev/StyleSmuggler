@@ -1,5 +1,12 @@
 # StyleSmuggler Helper Scripts
 
+> [!IMPORTANT]
+> **Adobe has released an official security patch for StyleSmuggler.**
+> It **replaces `fix-magento-source.sh`** — apply the official patch
+> instead of (or in addition to, if you already ran the community
+> mitigation) this script's Composer-based workaround.
+> Details: https://experienceleague.adobe.com/en/docs/commerce-knowledge-base/kb/announcements/commerce-apsb26-146
+
 Three bash scripts to deal with **StyleSmuggler** — a 0-day RCE affecting
 Magento / Adobe Commerce.
 Ref: https://sansec.io/research/stylesmuggler
@@ -113,6 +120,12 @@ node if your plan runs more than one), since the scan only covers the
 local filesystem, processes, and logs of the container it runs on.
 
 ## `fix-magento-source.sh` — proactive hardening / mitigation
+
+> [!NOTE]
+> Adobe's official patch (see the notice at the top of this README) now
+> replaces this script. It remains here for environments that applied the
+> community mitigation before the official patch shipped, or that cannot
+> apply the official patch immediately.
 
 > **Run this on your local development environment**, not on a live server
 > — it patches the Magento source code and Composer dependencies (via
