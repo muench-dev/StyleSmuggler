@@ -91,6 +91,26 @@ Graycore module is a hardening measure, not a fix for the structural root
 cause in the DI compiler, and does not remove any backdoor that may
 already be present. Validate on a staging system before production.
 
+### ddev / Warden support
+
+The script auto-detects local dev environments and runs Composer/`bin/magento`
+through them instead of directly on the host:
+
+- **ddev** — detected via a `.ddev` directory in `MAGENTO_ROOT`; runs
+  `ddev composer ...` and `ddev exec bin/magento ...`.
+- **Warden** — detected via `WARDEN_ENV_NAME=` in `MAGENTO_ROOT/.env`; runs
+  `warden env exec -T php-fpm composer ...` and
+  `warden env exec -T php-fpm bin/magento ...`. Override the service name
+  with `WARDEN_PHP_SERVICE` if your project doesn't use `php-fpm`.
+- Otherwise falls back to plain **native** `composer`/`bin/magento` on the
+  host.
+
+If a project marker is found but the matching CLI (`ddev`/`warden`) isn't on
+`PATH`, the script warns and falls back to native. Force a specific mode
+with `FIX_MAGENTO_ENV=ddev|warden|native` if detection picks the wrong one.
+Every confirmation prompt shows the exact resolved command (e.g.
+`Run: ddev composer require ... ?`) before it runs.
+
 ### Usage
 
 ```bash
@@ -103,6 +123,9 @@ Example:
 
 ```bash
 ./fix-magento-source.sh /var/www/magento
+
+# Force a mode instead of auto-detecting:
+FIX_MAGENTO_ENV=warden WARDEN_PHP_SERVICE=php ./fix-magento-source.sh /var/www/magento
 ```
 
 ## Disclaimer
