@@ -13,6 +13,11 @@ Use both: run `fix-magento-source.sh` to apply mitigations, and run
 `stylesmuggler-helper.sh` periodically (and immediately if you suspect an
 incident) to check for IoCs.
 
+Both scripts run on Linux and macOS (e.g. a developer's Mac driving a local
+ddev/Warden Magento environment) — CI runs ShellCheck and a functional smoke
+test on `ubuntu-latest` and `macos-latest` on every push. `ps`/`sed`/`netstat`
+usage is written to work with both GNU (Linux) and BSD (macOS) userlands.
+
 ## `stylesmuggler-helper.sh` — detection & incident-response cleanup
 
 Scans the local system for known Indicators of Compromise (IoCs):
