@@ -438,6 +438,41 @@ else
 fi
 
 # ----------------------------------------------------------------------
+# 7. Hash verification of discovered files against known malware samples
+# ----------------------------------------------------------------------
+# Every path-based match above (chronyd exe, glob hits, web shell) landed in
+# FOUND_FILES by now. A hash match against a publicly cataloged sample is a
+# much stronger signal than path/ownership heuristics alone - it doesn't
+# depend on the dropper's chosen filename/location, only on the payload
+# bytes themselves.
+info "7. Verifying discovered files against known malware hashes..."
+
+KNOWN_HASHES="e315687a1dfe61ef4a5a5642214db6d3b2b05d81391285eebc2af664641a26a7
+8334b434fa3fe9f59cebe9609b11e0b1fd19d10212c45c705adec1902a1d06ef
+251fabd50d7b18a8b5e1b3ef5d64e7198c17244778f6461fb1ab07f6169bf220
+b79dfdc1eed860e0b76c629d6adfce251db379b0b45a6d728d4ef483f7551420
+4352cabaa451e5a894535fbcc4d46628701303322a13745cb5479d7d0534ae8e
+d2fbf9eb75c495bfea48790d3b228fab0c15a282419c3d3f5e49294c4e1a3e82"
+
+if [ ${#FOUND_FILES[@]} -gt 0 ] && command -v sha256sum &>/dev/null; then
+    HASH_MATCH_FOUND=0
+    for f in "${FOUND_FILES[@]}"; do
+        [ -f "$f" ] || continue
+        file_hash=$(sha256sum "$f" 2>/dev/null | awk '{print $1}')
+        [ -n "$file_hash" ] || continue
+        if grep -qxF "$file_hash" <<< "$KNOWN_HASHES"; then
+            warn "[CONFIRMED] $f matches a known StyleSmuggler malware sample (sha256:$file_hash)"
+            HASH_MATCH_FOUND=1
+        fi
+    done
+    [ "$HASH_MATCH_FOUND" -eq 0 ] && ok "No discovered file matches a known malware sample hash (sample set only - a mismatch does not clear a file, since droppers are re-compiled per campaign)."
+elif [ ${#FOUND_FILES[@]} -gt 0 ]; then
+    echo -e "${YELLOW}[-] sha256sum not found - skipping hash verification of discovered files.${NC}"
+else
+    ok "No discovered files to hash-check."
+fi
+
+# ----------------------------------------------------------------------
 # Summary
 # ----------------------------------------------------------------------
 echo ""
