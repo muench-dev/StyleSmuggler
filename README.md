@@ -76,31 +76,20 @@ directly from there:
 cd /mnt/var
 git clone https://github.com/muench-dev/StyleSmuggler.git
 cd ./StyleSmuggler
-./stylesmuggler-helper.sh /app /var/log
+./stylesmuggler-helper.sh /app
 ```
 
 - `/mnt/var` is writable on Cloud containers, so it's a safe place to clone
   the repo without touching the deployed `/app` code.
 - `/app` is passed as `SHOP_DIR` so the script scans the actual deployed
   Magento root.
-- The `LOG_DIR` argument (2nd argument) is optional on Cloud: the script
-  auto-detects the right log directory using the `MAGENTO_CLOUD_PROJECT`
-  environment variable that Adobe Commerce Cloud sets automatically on
-  every node (it holds the project ID):
-  - **Pro Staging and Pro Production environments** aggregate logs under
-    `/var/log/platform/<project-id>` — the script uses that path
-    automatically when it exists on disk.
-  - **Dev environments** don't have that platform log directory, so the
-    script falls back to `/var/log`.
-
-  So on Cloud you can usually just run:
-
-  ```bash
-  ./stylesmuggler-helper.sh /app
-  ```
-
-  and the script prints which `LOG_DIR` it auto-detected. Pass an explicit
-  second argument any time to override auto-detection, e.g.
+- `LOG_DIR` (2nd argument) is left out on purpose: the script auto-detects
+  it using the `MAGENTO_CLOUD_PROJECT` environment variable that Adobe
+  Commerce Cloud sets automatically on every node (it holds the project
+  ID) — using `/var/log/platform/<project-id>` on Pro Staging/Production
+  when that path exists, and falling back to `/var/log` on Dev
+  environments. The script prints which `LOG_DIR` it auto-detected. Pass
+  an explicit second argument any time to override this, e.g.
   `./stylesmuggler-helper.sh /app /var/log/platform/<project-id>`.
 
 Repeat this on each environment/node you want to check (and on each web
